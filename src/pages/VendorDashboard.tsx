@@ -12,17 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -30,6 +19,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription as AlertDialogDescriptionText,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { getCatalogImagePublicUrl } from "@/lib/storage";
 import { formatTags, parseTagInput } from "@/lib/catalog-tags";
 
@@ -134,6 +135,7 @@ export default function VendorDashboard() {
   const [editCategory, setEditCategory] = useState("");
   const [editTags, setEditTags] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [showProBenefits, setShowProBenefits] = useState(false);
   const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
@@ -511,21 +513,35 @@ export default function VendorDashboard() {
               </div>
 
               {plan?.tier === "pro" ? (
-                <p className="text-sm text-muted-foreground">Pro is active. You can add up to {limit} items.</p>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">Pro is active. You can add up to {limit} items.</p>
+                  <Button variant="outline" className="w-full" onClick={() => setShowProBenefits(true)}>
+                    View Pro benefits
+                  </Button>
+                </div>
               ) : (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
                     Free plan allows {limit} items. Upgrade to unlock a higher catalog limit.
                   </p>
-                  <Button
-                    variant={plan?.upgrade_requested ? "outline" : "hero"}
-                    className="w-full"
-                    onClick={requestUpgrade}
-                    disabled={plan?.upgrade_requested}
-                  >
-                    {plan?.upgrade_requested ? "Upgrade requested" : "Request upgrade"}
-                  </Button>
-                  <p className="text-xs text-muted-foreground">Once approved by admin, your plan will update automatically.</p>
+
+                  <div className="grid gap-2">
+                    <Button
+                      variant={plan?.upgrade_requested ? "outline" : "hero"}
+                      className="w-full"
+                      onClick={requestUpgrade}
+                      disabled={plan?.upgrade_requested}
+                    >
+                      {plan?.upgrade_requested ? "Upgrade requested" : "Request upgrade"}
+                    </Button>
+                    <Button variant="outline" className="w-full" onClick={() => setShowProBenefits(true)}>
+                      View Pro benefits
+                    </Button>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Once approved by admin, your plan will update automatically.
+                  </p>
                 </div>
               )}
             </CardContent>
@@ -722,9 +738,9 @@ export default function VendorDashboard() {
                               <AlertDialogContent>
                                 <AlertDialogHeader>
                                   <AlertDialogTitle>Delete “{it.title}”?</AlertDialogTitle>
-                                  <AlertDialogDescription>
+                                  <AlertDialogDescriptionText>
                                     This will permanently remove the item from your catalog.
-                                  </AlertDialogDescription>
+                                  </AlertDialogDescriptionText>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -795,6 +811,63 @@ export default function VendorDashboard() {
             </Button>
             <Button variant="hero" onClick={saveEdit} disabled={savingEdit}>
               Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showProBenefits} onOpenChange={setShowProBenefits}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pro benefits</DialogTitle>
+            <DialogDescription>What you unlock when you upgrade.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-xl border bg-card p-4">
+              <p className="font-semibold">Higher catalog limit</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Add more items than the Free plan limit. Your exact limit depends on your plan approval.
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-card p-4">
+              <p className="font-semibold">Priority listing (coming soon)</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Pro vendors will be boosted in nearby results and category listings.
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-card p-4">
+              <p className="font-semibold">Faster support & verification (coming soon)</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Get quicker resolution for issues and faster review for updates.
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-card p-4">
+              <p className="font-semibold">More features</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                We’ll add Pro-only tools like bulk catalog upload and promotions.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            {plan?.tier !== "pro" ? (
+              <Button
+                variant={plan?.upgrade_requested ? "outline" : "hero"}
+                onClick={() => {
+                  setShowProBenefits(false);
+                  requestUpgrade();
+                }}
+                disabled={plan?.upgrade_requested}
+              >
+                {plan?.upgrade_requested ? "Upgrade requested" : "Request upgrade"}
+              </Button>
+            ) : null}
+            <Button variant="outline" onClick={() => setShowProBenefits(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
