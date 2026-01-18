@@ -157,33 +157,39 @@ export type Database = {
       }
       vendor_catalog_items: {
         Row: {
+          category: string | null
           created_at: string
           id: string
           in_stock: boolean
           photo_url: string | null
           price_inr: number
+          tags: string[]
           title: string
           unit: string
           updated_at: string
           vendor_id: string
         }
         Insert: {
+          category?: string | null
           created_at?: string
           id?: string
           in_stock?: boolean
           photo_url?: string | null
           price_inr: number
+          tags?: string[]
           title: string
           unit: string
           updated_at?: string
           vendor_id: string
         }
         Update: {
+          category?: string | null
           created_at?: string
           id?: string
           in_stock?: boolean
           photo_url?: string | null
           price_inr?: number
+          tags?: string[]
           title?: string
           unit?: string
           updated_at?: string
