@@ -458,7 +458,9 @@ export default function VendorDashboard() {
             <div>
               <p className="text-sm text-muted-foreground">Shop status</p>
               <p className="mt-1 font-semibold">
-                <Badge variant={vendor.is_online ? "default" : "secondary"}>{vendor.is_online ? "Online" : "Offline"}</Badge>
+                <Badge variant={vendor.is_online ? "default" : "secondary"}>
+                  {vendor.is_online ? "Online" : "Offline"}
+                </Badge>
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
                 {vendor.last_location_updated_at
@@ -472,20 +474,63 @@ export default function VendorDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Today’s location</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">Update daily for moving stalls.</p>
-            <Button variant="hero" className="w-full" onClick={updateLocationToday}>
-              Update location
-            </Button>
-            <Button variant="outline" className="w-full" disabled>
-              Set pin manually (next)
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Today’s location</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">Update daily for moving stalls.</p>
+              <Button variant="hero" className="w-full" onClick={updateLocationToday}>
+                Update location
+              </Button>
+              <Button variant="outline" className="w-full" disabled>
+                Set pin manually (next)
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Plan</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Current</p>
+                  <p className="mt-1 font-semibold">
+                    <Badge variant={plan?.tier === "pro" ? "default" : "secondary"}>
+                      {plan?.tier === "pro" ? "Pro" : "Free"}
+                    </Badge>
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-muted-foreground">Catalog limit</p>
+                  <p className="mt-1 font-semibold">{limit}</p>
+                </div>
+              </div>
+
+              {plan?.tier === "pro" ? (
+                <p className="text-sm text-muted-foreground">Pro is active. You can add up to {limit} items.</p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    Free plan allows {limit} items. Upgrade to unlock a higher catalog limit.
+                  </p>
+                  <Button
+                    variant={plan?.upgrade_requested ? "outline" : "hero"}
+                    className="w-full"
+                    onClick={requestUpgrade}
+                    disabled={plan?.upgrade_requested}
+                  >
+                    {plan?.upgrade_requested ? "Upgrade requested" : "Request upgrade"}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">Once approved by admin, your plan will update automatically.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       <Card>
