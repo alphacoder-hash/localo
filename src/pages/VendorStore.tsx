@@ -26,6 +26,7 @@ type CatalogRow = {
   price_inr: number;
   unit: string;
   in_stock: boolean;
+  photo_url: string | null;
 };
 
 export default function VendorStore() {
@@ -55,7 +56,7 @@ export default function VendorStore() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("vendor_catalog_items")
-        .select("id, title, price_inr, unit, in_stock")
+        .select("id, title, price_inr, unit, in_stock, photo_url")
         .eq("vendor_id", vendorId!)
         .eq("in_stock", true)
         .order("created_at", { ascending: false });
