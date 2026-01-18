@@ -14,6 +14,7 @@ import VendorApply from "./pages/VendorApply";
 import VendorDashboard from "./pages/VendorDashboard";
 import VendorOrders from "./pages/VendorOrders";
 import VendorStore from "./pages/VendorStore";
+import CustomerOrders from "./pages/CustomerOrders";
 import Admin from "./pages/Admin";
 import AdminSetup from "./pages/AdminSetup";
 import Auth from "./pages/Auth";
@@ -55,6 +56,14 @@ const App = () => (
                 }
               />
               <Route path="/vendor/:vendorId" element={<VendorStore />} />
+              <Route
+                path="/orders"
+                element={
+                  <RequireAuth>
+                    <CustomerOrders />
+                  </RequireAuth>
+                }
+              />
               <Route
                 path="/admin-setup"
                 element={
