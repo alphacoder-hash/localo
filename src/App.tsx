@@ -12,6 +12,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import VendorApply from "./pages/VendorApply";
 import VendorDashboard from "./pages/VendorDashboard";
+import VendorOrders from "./pages/VendorOrders";
 import VendorStore from "./pages/VendorStore";
 import Admin from "./pages/Admin";
 import AdminSetup from "./pages/AdminSetup";
@@ -42,6 +43,14 @@ const App = () => (
                 element={
                   <RequireAuth>
                     <VendorDashboard />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/vendor/orders"
+                element={
+                  <RequireAuth>
+                    <VendorOrders />
                   </RequireAuth>
                 }
               />
