@@ -1,1 +1,10 @@
 project_id = "bbmjvwicalpvevmoonvb"
+
+[functions.otp-send]
+verify_jwt = false
+
+[functions.otp-verify]
+verify_jwt = false
+
+[functions.admin-bootstrap]
+verify_jwt = false
