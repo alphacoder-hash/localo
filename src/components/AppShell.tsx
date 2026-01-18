@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LogOut, MapPin, ShieldCheck, Store } from "lucide-react";
+import { LogOut, MapPin, Receipt, ShieldCheck, Store } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/providers/AuthProvider";
@@ -53,6 +53,14 @@ export function AppShell() {
           </nav>
 
           <div className="flex items-center gap-2">
+            {user ? (
+              <Button asChild variant="soft" size="sm" className="hidden sm:inline-flex">
+                <Link to="/orders">
+                  <Receipt className="h-4 w-4" /> My orders
+                </Link>
+              </Button>
+            ) : null}
+
             <Button asChild variant="soft" size="sm" className="hidden sm:inline-flex">
               <Link to="/vendor/dashboard">
                 <Store className="h-4 w-4" /> Vendor
