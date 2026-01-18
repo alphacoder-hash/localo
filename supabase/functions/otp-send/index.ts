@@ -27,18 +27,17 @@ Deno.serve(async (req) => {
   try {
     if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
+    const authHeader = req.headers.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) return json(401, { error: "Unauthorized" });
+
+    const jwt = authHeader.slice("Bearer ".length).trim();
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      global: {
-        headers: {
-          Authorization: req.headers.get("Authorization") ?? "",
-        },
-      },
-    });
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    const { data, error: claimsErr } = await supabase.auth.getClaims();
+    const { data, error: claimsErr } = await supabase.auth.getClaims(jwt);
     const userId = (data as any)?.claims?.sub as string | undefined;
     if (claimsErr || !userId) return json(401, { error: "Unauthorized" });
 
