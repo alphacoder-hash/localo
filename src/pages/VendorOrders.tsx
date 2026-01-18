@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/providers/AuthProvider";
+import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,9 +60,40 @@ function orderTotal(items: OrderItemRow[]) {
   return items.reduce((sum, it) => sum + (it.price_snapshot_inr ?? 0) * (it.qty ?? 0), 0);
 }
 
+function canTransition(from: OrderStatus, to: OrderStatus) {
+  const allowed: Record<OrderStatus, OrderStatus[]> = {
+    placed: ["accepted", "cancelled"],
+    accepted: ["preparing", "cancelled"],
+    preparing: ["ready"],
+    ready: ["completed"],
+    completed: [],
+    cancelled: [],
+  };
+  return allowed[from]?.includes(to) ?? false;
+}
+
+function labelForStatus(s: OrderStatus) {
+  switch (s) {
+    case "accepted":
+      return "Accept";
+    case "preparing":
+      return "Preparing";
+    case "ready":
+      return "Ready";
+    case "completed":
+      return "Completed";
+    case "cancelled":
+      return "Cancel";
+    default:
+      return s;
+  }
+}
+
 export default function VendorOrders() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [selected, setSelected] = useState<OrderRow | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
 
   const vendorQuery = useQuery({
     queryKey: ["my_vendor_for_orders", user?.id],
@@ -212,6 +244,52 @@ export default function VendorOrders() {
                 <div className="rounded-xl border bg-card p-4">
                   <p className="text-sm font-semibold">Total</p>
                   <p className="mt-1 text-sm text-muted-foreground">{formatInr(orderTotal(selected.order_items ?? []))}</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border bg-card p-4">
+                <p className="text-sm font-semibold">Update status</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Move orders forward as you prepare them. Cancelling is only allowed before preparing.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(["accepted", "preparing", "ready", "completed", "cancelled"] as OrderStatus[]).map((next) => {
+                    const allowed = canTransition(selected.status, next);
+                    const isCancel = next === "cancelled";
+                    return (
+                      <Button
+                        key={next}
+                        type="button"
+                        variant={isCancel ? "outline" : "hero"}
+                        disabled={!allowed || statusBusy}
+                        onClick={async () => {
+                          if (!allowed) return;
+                          setStatusBusy(true);
+                          try {
+                            const { error } = await supabase
+                              .from("orders")
+                              .update({ status: next })
+                              .eq("id", selected.id);
+                            if (error) throw error;
+
+                            toast({ title: "Status updated", description: `Marked as ${next}.` });
+                            setSelected((prev) => (prev ? { ...prev, status: next } : prev));
+                            ordersQuery.refetch();
+                          } catch (e: any) {
+                            toast({
+                              title: "Update failed",
+                              description: e?.message ?? "Please try again",
+                              variant: "destructive",
+                            });
+                          } finally {
+                            setStatusBusy(false);
+                          }
+                        }}
+                      >
+                        {labelForStatus(next)}
+                      </Button>
+                    );
+                  })}
                 </div>
               </div>
 

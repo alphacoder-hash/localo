@@ -158,6 +158,27 @@ export default function VendorStore() {
       return;
     }
 
+    // UX guard (backend also blocks this via RLS)
+    try {
+      const { data: isOwner, error } = await supabase.rpc("is_vendor_owner", { _vendor_id: vendor.id });
+      if (error) throw error;
+      if (isOwner) {
+        toast({
+          title: "Not allowed",
+          description: "Vendors can’t place orders to their own store.",
+          variant: "destructive",
+        });
+        return;
+      }
+    } catch (e: any) {
+      toast({
+        title: "Couldn’t verify vendor",
+        description: e?.message ?? "Please try again",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const parsed = checkoutSchema.safeParse({
       payment_mode: paymentMode,
       pickup_note: pickupNote,
