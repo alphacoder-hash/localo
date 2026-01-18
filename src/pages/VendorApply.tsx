@@ -19,9 +19,9 @@ const vendorSchema = z.object({
   vendorType: z.enum(["moving", "fixed"]),
   shopName: z.string().trim().min(2).max(80),
   category: z.string().trim().min(2).max(40),
-  note: z.string().trim().max(120).optional().or(z.literal("")),
-  city: z.string().trim().max(40).optional().or(z.literal("")),
-  state: z.string().trim().max(40).optional().or(z.literal("")),
+  note: z.string().trim().min(3, "Landmark / address note is required").max(120),
+  city: z.string().trim().min(2, "City is required").max(40),
+  state: z.string().trim().min(2, "State is required").max(40),
   phone: z.string().trim().min(10).max(20),
 });
 
@@ -233,23 +233,23 @@ export default function VendorApply() {
             <div className="space-y-5">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Shop / Stall name</Label>
+                  <Label>Shop / Stall name *</Label>
                   <Input value={shopName} onChange={(e) => setShopName(e.target.value)} placeholder="Kaveri Fruit Cart" />
                 </div>
                 <div className="space-y-2">
-                  <Label>Category</Label>
+                  <Label>Category *</Label>
                   <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Fruit & Veg" />
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <Label>Landmark / Address note</Label>
+                  <Label>Landmark / Address note *</Label>
                   <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Near metro gate, Opp. SBI ATM…" />
                 </div>
                 <div className="space-y-2">
-                  <Label>City</Label>
+                  <Label>City *</Label>
                   <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Bengaluru" />
                 </div>
                 <div className="space-y-2">
-                  <Label>State</Label>
+                  <Label>State *</Label>
                   <Input value={state} onChange={(e) => setState(e.target.value)} placeholder="Karnataka" />
                 </div>
               </div>
@@ -356,11 +356,11 @@ export default function VendorApply() {
 
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Phone</Label>
+                    <Label>Phone *</Label>
                     <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 9xxxxxxxxx" />
                   </div>
                   <div className="space-y-2">
-                    <Label>OTP</Label>
+                    <Label>OTP *</Label>
                     <Input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="123456" />
                   </div>
                 </div>
