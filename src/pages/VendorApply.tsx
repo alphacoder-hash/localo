@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 
@@ -38,7 +38,13 @@ export default function VendorApply() {
 
   const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
+
   const [otp, setOtp] = useState("");
+  const [otpCooldown, setOtpCooldown] = useState(0);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [phoneVerified, setPhoneVerified] = useState(false);
+
   const [loading, setLoading] = useState(false);
 
   const { user } = useAuth();
@@ -70,8 +76,24 @@ export default function VendorApply() {
   const canContinueStep2 = step2Validation.success;
   const canContinueStep3 = !!coords;
   const canContinueStep4 = !!selfieFile;
-  const canSubmitStep5 = step5Validation.success && otp.trim().length >= 4;
+  const canSubmitStep5 = step5Validation.success && phoneVerified;
 
+  const toE164India = (raw: string) => {
+    const v = raw.trim().replace(/[\s-]/g, "");
+    if (!v) return null;
+    if (v.startsWith("+")) return /^\+[1-9]\d{7,14}$/.test(v) ? v : null;
+    // If user enters 10-digit Indian number, prefix +91
+    if (/^\d{10}$/.test(v)) return `+91${v}`;
+    return null;
+  };
+
+  const phoneE164 = useMemo(() => toE164India(phone), [phone]);
+
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+    const t = window.setInterval(() => setOtpCooldown((s) => Math.max(0, s - 1)), 1000);
+    return () => window.clearInterval(t);
+  }, [otpCooldown]);
 
   const grabGps = () => {
     if (!navigator.geolocation) {
@@ -125,10 +147,25 @@ export default function VendorApply() {
       return;
     }
 
-    // Note: Real SMS OTP depends on SMS provider configuration.
-    // For now we accept the OTP field as a UI placeholder.
-    if (otp.trim().length < 4) {
-      toast({ title: "Enter OTP", description: "OTP is required (we’ll wire SMS next).", variant: "destructive" });
+    if (!phoneVerified) {
+      toast({ title: "Verify phone", description: "Please verify your phone number using OTP.", variant: "destructive" });
+      return;
+    }
+
+    if (!phoneE164) {
+      toast({ title: "Invalid phone", description: "Enter a valid Indian number (10 digits) or E.164 (+91...).", variant: "destructive" });
+      return;
+    }
+
+    // Double-check backend marker (prevents accidental submit without verify)
+    const { data: pv, error: pvErr } = await supabase
+      .from("phone_verifications")
+      .select("id")
+      .eq("phone_e164", phoneE164)
+      .maybeSingle();
+
+    if (pvErr || !pv?.id) {
+      toast({ title: "Phone not verified", description: "Please verify again.", variant: "destructive" });
       return;
     }
 
@@ -173,7 +210,7 @@ export default function VendorApply() {
       // 3) Store phone in separate table
       const { error: contactErr } = await supabase
         .from("vendor_contacts")
-        .insert({ vendor_id: vendor.id, phone_e164: parsed.data.phone });
+        .insert({ vendor_id: vendor.id, phone_e164: phoneE164 });
 
       if (contactErr) throw contactErr;
 
@@ -409,35 +446,108 @@ export default function VendorApply() {
                     <Phone className="h-4 w-4" />
                   </span>
                   <div>
-                    <p className="font-semibold">Verify phone via OTP</p>
-                    <p className="text-sm text-muted-foreground">
-                      SMS provider setup comes next. For now this captures the phone number.
-                    </p>
+                      <p className="font-semibold">Verify phone via OTP</p>
+                      <p className="text-sm text-muted-foreground">
+                        We’ll send an OTP via SMS (60s resend timer, 3 requests per 15 minutes).
+                      </p>
                   </div>
                 </div>
 
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Phone *</Label>
-                    <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 9xxxxxxxxx" />
+                    <Input
+                      value={phone}
+                      onChange={(e) => {
+                        setPhone(e.target.value);
+                        setPhoneVerified(false);
+                      }}
+                      placeholder="10-digit or +91xxxxxxxxxx"
+                      disabled={otpSending || otpVerifying || phoneVerified}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>OTP *</Label>
-                    <Input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="123456" />
+                    <Input
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value)}
+                      placeholder="1234"
+                      inputMode="numeric"
+                      disabled={otpSending || otpVerifying || phoneVerified}
+                    />
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button variant="outline" disabled>
-                    Send OTP (next)
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      if (!phoneE164) {
+                        toast({
+                          title: "Invalid phone",
+                          description: "Enter 10 digits (India) or a full E.164 number like +919876543210.",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      setOtpSending(true);
+                      try {
+                        const { data, error } = await supabase.functions.invoke("otp-send", {
+                          body: { phone_e164: phoneE164 },
+                        });
+                        if (error) throw error;
+                        const cooldown = Math.max(0, Number((data as any)?.cooldown_seconds ?? 60));
+                        setOtpCooldown(cooldown);
+                        toast({ title: "OTP sent", description: `We sent an OTP to ${phoneE164}.` });
+                      } catch (e: any) {
+                        const msg = e?.message ?? "Try again";
+                        toast({ title: "Couldn’t send OTP", description: msg, variant: "destructive" });
+                      } finally {
+                        setOtpSending(false);
+                      }
+                    }}
+                    disabled={otpSending || otpCooldown > 0 || phoneVerified}
+                  >
+                    {otpCooldown > 0 ? `Resend in ${otpCooldown}s` : otpSending ? "Sending…" : "Send OTP"}
                   </Button>
+
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      if (!phoneE164) {
+                        toast({ title: "Invalid phone", variant: "destructive" });
+                        return;
+                      }
+                      if (!otp.trim()) {
+                        toast({ title: "Enter OTP", description: "Type the code you received via SMS.", variant: "destructive" });
+                        return;
+                      }
+                      setOtpVerifying(true);
+                      try {
+                        const { error } = await supabase.functions.invoke("otp-verify", {
+                          body: { phone_e164: phoneE164, code: otp.trim() },
+                        });
+                        if (error) throw error;
+                        setPhoneVerified(true);
+                        toast({ title: "Phone verified" });
+                      } catch (e: any) {
+                        toast({ title: "Invalid OTP", description: e?.message ?? "Try again", variant: "destructive" });
+                      } finally {
+                        setOtpVerifying(false);
+                      }
+                    }}
+                    disabled={otpVerifying || phoneVerified}
+                  >
+                    {otpVerifying ? "Verifying…" : phoneVerified ? "Verified" : "Verify OTP"}
+                  </Button>
+
                   <Button
                     variant="hero"
                     onClick={() => {
                       if (!canSubmitStep5) {
                         const msg = !step5Validation.success
                           ? step5Validation.error.errors[0]?.message
-                          : "Enter the OTP to continue.";
+                          : "Verify your phone number before submitting.";
                         toast({ title: "Complete Step 5", description: msg ?? "Fill all required fields", variant: "destructive" });
                         return;
                       }
@@ -445,7 +555,7 @@ export default function VendorApply() {
                     }}
                     disabled={loading}
                   >
-                    {loading ? "Submitting…" : "Verify & Submit"}
+                    {loading ? "Submitting…" : "Submit application"}
                   </Button>
                 </div>
 
