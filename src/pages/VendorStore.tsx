@@ -1,13 +1,27 @@
 import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Navigation } from "lucide-react";
+import { Navigation, Minus, Plus, ShoppingCart } from "lucide-react";
+import { z } from "zod";
 
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/providers/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import { useToast } from "@/hooks/use-toast";
 import { getCatalogImagePublicUrl } from "@/lib/storage";
 
 type VendorPublic = {
@@ -33,12 +47,41 @@ type CatalogRow = {
   tags: string[];
 };
 
+type PaymentMode = "upi" | "cash";
+
+function formatInr(amount: number) {
+  try {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `₹${amount}`;
+  }
+}
+
+const checkoutSchema = z.object({
+  payment_mode: z.enum(["upi", "cash"]),
+  pickup_note: z.string().trim().max(200).optional(),
+});
+
 export default function VendorStore() {
   const { vendorId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
+  const { toast } = useToast();
 
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [tagFilter, setTagFilter] = useState<string[]>([]);
+
+  const [cart, setCart] = useState<Record<string, number>>({});
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>("upi");
+  const [pickupNote, setPickupNote] = useState("");
+  const [placing, setPlacing] = useState(false);
 
   const vendorQuery = useQuery({
     queryKey: ["vendor_public", vendorId],
@@ -77,6 +120,110 @@ export default function VendorStore() {
     if (!vendor?.last_location_updated_at) return false;
     return Date.now() - new Date(vendor.last_location_updated_at).getTime() < 24 * 60 * 60 * 1000;
   }, [vendor?.last_location_updated_at]);
+
+  const cartItems = useMemo(() => {
+    const list = catalogQuery.data ?? [];
+    const byId = new Map(list.map((it) => [it.id, it] as const));
+
+    return Object.entries(cart)
+      .map(([id, qty]) => {
+        const it = byId.get(id);
+        if (!it) return null;
+        const safeQty = Number.isFinite(qty) ? Math.max(0, Math.min(99, Math.floor(qty))) : 0;
+        if (safeQty <= 0) return null;
+        return { ...it, qty: safeQty };
+      })
+      .filter(Boolean) as Array<CatalogRow & { qty: number }>;
+  }, [cart, catalogQuery.data]);
+
+  const cartCount = useMemo(() => cartItems.reduce((sum, it) => sum + it.qty, 0), [cartItems]);
+  const cartTotal = useMemo(() => cartItems.reduce((sum, it) => sum + it.price_inr * it.qty, 0), [cartItems]);
+
+  const setCartQty = (itemId: string, nextQty: number) => {
+    setCart((prev) => {
+      const qty = Math.max(0, Math.min(99, Math.floor(nextQty)));
+      if (qty <= 0) {
+        const { [itemId]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [itemId]: qty };
+    });
+  };
+
+  const placeOrder = async () => {
+    if (!vendorId || !vendor) return;
+
+    if (!user) {
+      navigate("/auth", { replace: true, state: { from: location.pathname } });
+      return;
+    }
+
+    const parsed = checkoutSchema.safeParse({
+      payment_mode: paymentMode,
+      pickup_note: pickupNote,
+    });
+
+    if (!parsed.success) {
+      toast({
+        title: "Check checkout details",
+        description: parsed.error.errors[0]?.message ?? "Invalid input",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (cartItems.length === 0) {
+      toast({ title: "Your cart is empty", variant: "destructive" });
+      return;
+    }
+
+    setPlacing(true);
+    try {
+      const { data: order, error: orderError } = await supabase
+        .from("orders")
+        .insert({
+          vendor_id: vendor.id,
+          customer_user_id: user.id,
+          payment_mode: parsed.data.payment_mode,
+          pickup_note: parsed.data.pickup_note?.trim() ? parsed.data.pickup_note.trim() : null,
+        })
+        .select("id")
+        .single();
+
+      if (orderError) throw orderError;
+
+      const { error: itemsError } = await supabase.from("order_items").insert(
+        cartItems.map((it) => ({
+          order_id: order.id,
+          catalog_item_id: it.id,
+          qty: it.qty,
+          price_snapshot_inr: it.price_inr,
+          title_snapshot: it.title,
+          unit_snapshot: it.unit,
+        })),
+      );
+
+      if (itemsError) throw itemsError;
+
+      toast({
+        title: "Order placed",
+        description: "The vendor has received your order. Pay at pickup (UPI or cash).",
+      });
+
+      setCart({});
+      setPickupNote("");
+      setPaymentMode("upi");
+      setCheckoutOpen(false);
+    } catch (e: any) {
+      toast({
+        title: "Order failed",
+        description: e?.message ?? "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setPlacing(false);
+    }
+  };
 
   if (vendorQuery.isLoading) return null;
 
@@ -185,6 +332,7 @@ export default function VendorStore() {
               );
             })()}
           </CardHeader>
+
           <CardContent className="space-y-3">
             {(() => {
               const q = search.trim().toLowerCase();
@@ -209,6 +357,8 @@ export default function VendorStore() {
 
               return items.map((it) => {
                 const img = getCatalogImagePublicUrl(it.photo_url);
+                const qty = cart[it.id] ?? 0;
+
                 return (
                   <div key={it.id} className="flex items-center gap-3 rounded-xl border bg-card p-4">
                     <div className="h-12 w-12 overflow-hidden rounded-lg border bg-muted">
@@ -221,42 +371,181 @@ export default function VendorStore() {
                         />
                       ) : null}
                     </div>
-                    <div>
-                      <p className="font-semibold">{it.title}</p>
-                      <p className="text-sm text-muted-foreground">₹{it.price_inr} / {it.unit}</p>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold">{it.title}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatInr(it.price_inr)} / {it.unit}
+                      </p>
                       {(it.category || (it.tags ?? []).length) ? (
                         <div className="mt-2 flex flex-wrap gap-2">
                           {it.category ? <Badge variant="outline">{it.category}</Badge> : null}
                           {(it.tags ?? []).slice(0, 4).map((t) => (
-                            <Badge key={t} variant="secondary">#{t}</Badge>
+                            <Badge key={t} variant="secondary">
+                              #{t}
+                            </Badge>
                           ))}
                         </div>
                       ) : null}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {qty > 0 ? (
+                        <div className="flex items-center gap-1 rounded-lg border bg-background p-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => setCartQty(it.id, qty - 1)}
+                            aria-label={`Decrease ${it.title} quantity`}
+                          >
+                            <Minus className="h-4 w-4" />
+                          </Button>
+                          <span className="w-7 text-center text-sm font-semibold">{qty}</span>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => setCartQty(it.id, qty + 1)}
+                            aria-label={`Increase ${it.title} quantity`}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button type="button" variant="outline" onClick={() => setCartQty(it.id, 1)}>
+                          Add
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );
               });
             })()}
-
-            <p className="text-sm text-muted-foreground">Ordering comes next (Step 10). For now, discovery + catalog is live.</p>
           </CardContent>
         </Card>
 
         <Card className="md:col-span-5">
           <CardHeader>
-            <CardTitle className="text-base">Quick actions</CardTitle>
+            <CardTitle className="text-base">Cart</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Button variant="hero" className="w-full" disabled>
-              Add to cart (next)
-            </Button>
-            <Button variant="outline" className="w-full" disabled>
-              Place order (pay at pickup)
+            {cartItems.length === 0 ? (
+              <div className="rounded-xl border bg-card p-4">
+                <p className="font-semibold">Your cart is empty</p>
+                <p className="mt-1 text-sm text-muted-foreground">Add items from the catalog to place an order.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  {cartItems.slice(0, 6).map((it) => (
+                    <div key={it.id} className="flex items-start justify-between gap-2 text-sm">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{it.title}</p>
+                        <p className="text-muted-foreground">
+                          {it.qty} × {formatInr(it.price_inr)}
+                        </p>
+                      </div>
+                      <p className="whitespace-nowrap font-semibold">{formatInr(it.qty * it.price_inr)}</p>
+                    </div>
+                  ))}
+                  {cartItems.length > 6 ? (
+                    <p className="text-xs text-muted-foreground">+ {cartItems.length - 6} more items</p>
+                  ) : null}
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">Total</p>
+                  <p className="font-semibold">{formatInr(cartTotal)}</p>
+                </div>
+              </div>
+            )}
+
+            <Button
+              variant="hero"
+              className="w-full"
+              disabled={cartItems.length === 0}
+              onClick={() => setCheckoutOpen(true)}
+            >
+              <ShoppingCart className="h-4 w-4" /> Checkout ({cartCount})
             </Button>
             <p className="text-sm text-muted-foreground">Payment is always at pickup: UPI or cash.</p>
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={checkoutOpen} onOpenChange={setCheckoutOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Checkout</DialogTitle>
+            <DialogDescription>Confirm your cart and place the order. The vendor will prepare it for pickup.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-xl border bg-card p-4">
+              <p className="text-sm font-semibold">Order summary</p>
+              <div className="mt-3 space-y-2">
+                {cartItems.map((it) => (
+                  <div key={it.id} className="flex items-start justify-between gap-3 text-sm">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">
+                        {it.title} <span className="text-muted-foreground">× {it.qty}</span>
+                      </p>
+                      <p className="text-muted-foreground">
+                        {formatInr(it.price_inr)} / {it.unit}
+                      </p>
+                    </div>
+                    <p className="whitespace-nowrap font-semibold">{formatInr(it.qty * it.price_inr)}</p>
+                  </div>
+                ))}
+              </div>
+              <Separator className="my-3" />
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">Total</p>
+                <p className="font-semibold">{formatInr(cartTotal)}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Payment mode</Label>
+                <select
+                  value={paymentMode}
+                  onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  aria-label="Payment mode"
+                >
+                  <option value="upi">UPI</option>
+                  <option value="cash">Cash</option>
+                </select>
+                <p className="text-xs text-muted-foreground">You’ll pay when you pick up the order.</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Pickup note (optional)</Label>
+                <Textarea
+                  value={pickupNote}
+                  onChange={(e) => setPickupNote(e.target.value)}
+                  placeholder="Any instructions for pickup?"
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">Max 200 characters.</p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCheckoutOpen(false)} disabled={placing}>
+              Cancel
+            </Button>
+            <Button variant="hero" onClick={placeOrder} disabled={placing || cartItems.length === 0}>
+              {placing ? "Placing…" : user ? "Place order" : "Login to place order"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
