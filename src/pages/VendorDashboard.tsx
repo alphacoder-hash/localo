@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { getCatalogImagePublicUrl } from "@/lib/storage";
 
 const itemSchema = z.object({
   title: z.string().trim().min(2).max(60),
@@ -95,6 +96,7 @@ export default function VendorDashboard() {
   const [newTitle, setNewTitle] = useState("");
   const [newPrice, setNewPrice] = useState<string>("");
   const [newUnit, setNewUnit] = useState("kg");
+  const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
 
   const plan = planQuery.data;
   const limit = plan?.catalog_limit ?? 5;
@@ -215,6 +217,37 @@ export default function VendorDashboard() {
     planQuery.refetch();
   };
 
+  const uploadItemPhoto = async (itemId: string, file: File) => {
+    if (!user) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Invalid file", description: "Please choose an image.", variant: "destructive" });
+      return;
+    }
+
+    setUploadingItemId(itemId);
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${user.id}/${itemId}-${Date.now()}.${ext}`;
+
+      const { error: uploadErr } = await supabase.storage.from("catalog-images").upload(path, file, { upsert: true });
+      if (uploadErr) throw uploadErr;
+
+      const { error: updateErr } = await supabase
+        .from("vendor_catalog_items")
+        .update({ photo_url: path })
+        .eq("id", itemId);
+      if (updateErr) throw updateErr;
+
+      toast({ title: "Photo uploaded" });
+      catalogQuery.refetch();
+    } catch (e: any) {
+      toast({ title: "Couldn’t upload", description: e?.message ?? "Try again", variant: "destructive" });
+    } finally {
+      setUploadingItemId(null);
+    }
+  };
+
   const statusBadge = useMemo(() => {
     if (!vendor) return <Badge variant="secondary">No application</Badge>;
     if (vendor.verification_status === "approved") return <Badge>Approved</Badge>;
@@ -271,9 +304,7 @@ export default function VendorDashboard() {
             <div>
               <p className="text-sm text-muted-foreground">Shop status</p>
               <p className="mt-1 font-semibold">
-                <Badge variant={vendor.is_online ? "default" : "secondary"}>
-                  {vendor.is_online ? "Online" : "Offline"}
-                </Badge>
+                <Badge variant={vendor.is_online ? "default" : "secondary"}>{vendor.is_online ? "Online" : "Offline"}</Badge>
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
                 {vendor.last_location_updated_at
@@ -320,12 +351,7 @@ export default function VendorDashboard() {
                 <Button variant="hero" className="w-full" onClick={addItem}>
                   Add
                 </Button>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={requestUpgrade}
-                  disabled={plan?.upgrade_requested}
-                >
+                <Button variant="outline" className="w-full" onClick={requestUpgrade} disabled={plan?.upgrade_requested}>
                   {plan?.upgrade_requested ? "Upgrade requested" : "Request upgrade"}
                 </Button>
               </div>
@@ -340,15 +366,44 @@ export default function VendorDashboard() {
                     <p className="mt-1 text-sm text-muted-foreground">Add your first item to start receiving orders.</p>
                   </div>
                 ) : (
-                  (catalogQuery.data ?? []).map((it) => (
-                    <div key={it.id} className="flex items-center justify-between rounded-xl border bg-card p-4">
-                      <div>
-                        <p className="font-semibold">{it.title}</p>
-                        <p className="text-sm text-muted-foreground">₹{it.price_inr} / {it.unit}</p>
+                  (catalogQuery.data ?? []).map((it) => {
+                    const img = getCatalogImagePublicUrl(it.photo_url);
+                    return (
+                      <div key={it.id} className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="h-12 w-12 overflow-hidden rounded-lg border bg-muted">
+                            {img ? (
+                              <img
+                                src={img}
+                                alt={`${it.title} photo`}
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : null}
+                          </div>
+                          <div>
+                            <p className="font-semibold">{it.title}</p>
+                            <p className="text-sm text-muted-foreground">₹{it.price_inr} / {it.unit}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2 sm:items-end">
+                          <Badge variant={it.in_stock ? "default" : "secondary"}>{it.in_stock ? "In stock" : "Out"}</Badge>
+                          <Input
+                            type="file"
+                            accept="image/*"
+                            disabled={uploadingItemId === it.id}
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              e.currentTarget.value = "";
+                              if (!f) return;
+                              uploadItemPhoto(it.id, f);
+                            }}
+                          />
+                        </div>
                       </div>
-                      <Badge variant={it.in_stock ? "default" : "secondary"}>{it.in_stock ? "In stock" : "Out"}</Badge>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
