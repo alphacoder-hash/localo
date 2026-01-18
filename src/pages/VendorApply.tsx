@@ -50,6 +50,29 @@ export default function VendorApply() {
     [vendorType],
   );
 
+  const step2Schema = vendorSchema.pick({ shopName: true, category: true, note: true, city: true, state: true });
+  const step5Schema = vendorSchema.pick({ phone: true });
+
+  const step2Validation = useMemo(
+    () =>
+      step2Schema.safeParse({
+        shopName,
+        category,
+        note,
+        city,
+        state,
+      }),
+    [shopName, category, note, city, state],
+  );
+
+  const step5Validation = useMemo(() => step5Schema.safeParse({ phone }), [phone]);
+
+  const canContinueStep2 = step2Validation.success;
+  const canContinueStep3 = !!coords;
+  const canContinueStep4 = !!selfieFile;
+  const canSubmitStep5 = step5Validation.success && otp.trim().length >= 4;
+
+
   const grabGps = () => {
     if (!navigator.geolocation) {
       toast({ title: "GPS not available", variant: "destructive" });
@@ -258,7 +281,18 @@ export default function VendorApply() {
                 <Button variant="outline" onClick={() => setStep(1)}>
                   Back
                 </Button>
-                <Button variant="hero" onClick={() => setStep(3)}>
+                <Button
+                  variant="hero"
+                  onClick={() => {
+                    if (canContinueStep2) {
+                      setStep(3);
+                      return;
+                    }
+                    const msg = step2Validation.success ? "Please complete required fields" : step2Validation.error.errors[0]?.message;
+                    toast({ title: "Complete Step 2", description: msg ?? "Fill all required fields", variant: "destructive" });
+                  }}
+                  disabled={!canContinueStep2}
+                >
                   Continue
                 </Button>
               </div>
@@ -298,7 +332,21 @@ export default function VendorApply() {
                 <Button variant="outline" onClick={() => setStep(2)}>
                   Back
                 </Button>
-                <Button variant="hero" onClick={() => setStep(4)}>
+                <Button
+                  variant="hero"
+                  onClick={() => {
+                    if (canContinueStep3) {
+                      setStep(4);
+                      return;
+                    }
+                    toast({
+                      title: "Capture location",
+                      description: "Use GPS to save your location before continuing.",
+                      variant: "destructive",
+                    });
+                  }}
+                  disabled={!canContinueStep3}
+                >
                   Continue
                 </Button>
               </div>
@@ -332,7 +380,21 @@ export default function VendorApply() {
                 <Button variant="outline" onClick={() => setStep(3)}>
                   Back
                 </Button>
-                <Button variant="hero" onClick={() => setStep(5)}>
+                <Button
+                  variant="hero"
+                  onClick={() => {
+                    if (canContinueStep4) {
+                      setStep(5);
+                      return;
+                    }
+                    toast({
+                      title: "Selfie required",
+                      description: "Upload a selfie with your stall/shop before continuing.",
+                      variant: "destructive",
+                    });
+                  }}
+                  disabled={!canContinueStep4}
+                >
                   Continue
                 </Button>
               </div>
@@ -369,7 +431,20 @@ export default function VendorApply() {
                   <Button variant="outline" disabled>
                     Send OTP (next)
                   </Button>
-                  <Button variant="hero" onClick={submit} disabled={loading}>
+                  <Button
+                    variant="hero"
+                    onClick={() => {
+                      if (!canSubmitStep5) {
+                        const msg = !step5Validation.success
+                          ? step5Validation.error.errors[0]?.message
+                          : "Enter the OTP to continue.";
+                        toast({ title: "Complete Step 5", description: msg ?? "Fill all required fields", variant: "destructive" });
+                        return;
+                      }
+                      submit();
+                    }}
+                    disabled={loading}
+                  >
                     {loading ? "Submitting…" : "Verify & Submit"}
                   </Button>
                 </div>
