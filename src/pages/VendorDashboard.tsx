@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getCatalogImagePublicUrl } from "@/lib/storage";
+import { formatTags, parseTagInput } from "@/lib/catalog-tags";
 
 const itemSchema = z.object({
   title: z.string().trim().min(2).max(60),
@@ -66,6 +67,8 @@ type CatalogRow = {
   unit: string;
   in_stock: boolean;
   photo_url: string | null;
+  category: string | null;
+  tags: string[];
 };
 
 export default function VendorDashboard() {
@@ -110,7 +113,7 @@ export default function VendorDashboard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("vendor_catalog_items")
-        .select("id, title, price_inr, unit, in_stock, photo_url")
+        .select("id, title, price_inr, unit, in_stock, photo_url, category, tags")
         .eq("vendor_id", vendor!.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -121,11 +124,15 @@ export default function VendorDashboard() {
   const [newTitle, setNewTitle] = useState("");
   const [newPrice, setNewPrice] = useState<string>("");
   const [newUnit, setNewUnit] = useState("kg");
+  const [newCategory, setNewCategory] = useState("");
+  const [newTags, setNewTags] = useState("");
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
 
   const [editingItem, setEditingItem] = useState<CatalogRow | null>(null);
   const [editPrice, setEditPrice] = useState<string>("");
   const [editUnit, setEditUnit] = useState<string>("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editTags, setEditTags] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
@@ -136,12 +143,34 @@ export default function VendorDashboard() {
 
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"name" | "stock" | "price_asc" | "price_desc">("stock");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+
+  const availableCategories = useMemo(() => {
+    const cats = (catalogQuery.data ?? [])
+      .map((it) => it.category?.trim())
+      .filter((c): c is string => !!c);
+    return Array.from(new Set(cats)).sort((a, b) => a.localeCompare(b));
+  }, [catalogQuery.data]);
+
+  const availableTags = useMemo(() => {
+    const tags = (catalogQuery.data ?? []).flatMap((it) => it.tags ?? []);
+    return Array.from(new Set(tags)).sort((a, b) => a.localeCompare(b));
+  }, [catalogQuery.data]);
 
   const filteredAndSortedItems = useMemo(() => {
     const items = [...(catalogQuery.data ?? [])];
 
     const q = search.trim().toLowerCase();
-    const filtered = q ? items.filter((it) => it.title.toLowerCase().includes(q)) : items;
+    let filtered = q ? items.filter((it) => it.title.toLowerCase().includes(q)) : items;
+
+    if (categoryFilter.trim()) {
+      filtered = filtered.filter((it) => (it.category ?? "").toLowerCase() === categoryFilter.toLowerCase());
+    }
+
+    if (tagFilter.length) {
+      filtered = filtered.filter((it) => (it.tags ?? []).some((t) => tagFilter.includes(t)));
+    }
 
     filtered.sort((a, b) => {
       if (sort === "stock") {
@@ -154,7 +183,7 @@ export default function VendorDashboard() {
     });
 
     return filtered;
-  }, [catalogQuery.data, search, sort]);
+  }, [catalogQuery.data, search, sort, categoryFilter, tagFilter]);
 
   const toggleOnline = async () => {
     const next = !vendor.is_online;
@@ -233,11 +262,16 @@ export default function VendorDashboard() {
       return;
     }
 
+    const tags = parseTagInput(newTags);
+    const category = newCategory.trim() ? newCategory.trim() : null;
+
     const { error } = await supabase.from("vendor_catalog_items").insert({
       vendor_id: vendor.id,
       title: parsed.data.title,
       price_inr: parsed.data.price_inr,
       unit: parsed.data.unit,
+      category,
+      tags,
       in_stock: true,
     });
 
@@ -249,6 +283,8 @@ export default function VendorDashboard() {
     setNewTitle("");
     setNewPrice("");
     setNewUnit("kg");
+    setNewCategory("");
+    setNewTags("");
     toast({ title: "Item added" });
     catalogQuery.refetch();
   };
@@ -302,6 +338,8 @@ export default function VendorDashboard() {
     setEditingItem(it);
     setEditPrice(String(it.price_inr));
     setEditUnit(it.unit);
+    setEditCategory(it.category ?? "");
+    setEditTags(formatTags(it.tags));
   };
 
   const saveEdit = async () => {
@@ -315,9 +353,12 @@ export default function VendorDashboard() {
 
     setSavingEdit(true);
     try {
+      const tags = parseTagInput(editTags);
+      const category = editCategory.trim() ? editCategory.trim() : null;
+
       const { error } = await supabase
         .from("vendor_catalog_items")
-        .update({ price_inr: parsed.data.price_inr, unit: parsed.data.unit })
+        .update({ price_inr: parsed.data.price_inr, unit: parsed.data.unit, category, tags })
         .eq("id", editingItem.id);
       if (error) throw error;
 
@@ -470,6 +511,16 @@ export default function VendorDashboard() {
                   onChange={(e) => setNewUnit(e.target.value)}
                   placeholder="Unit (kg/piece/dozen)"
                 />
+                <Input
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  placeholder="Category (e.g. fruit)"
+                />
+                <Input
+                  value={newTags}
+                  onChange={(e) => setNewTags(e.target.value)}
+                  placeholder="Tags (comma separated)"
+                />
                 <Button variant="hero" className="w-full" onClick={addItem}>
                   Add
                 </Button>
@@ -490,6 +541,21 @@ export default function VendorDashboard() {
                     placeholder="Search items…"
                     className="sm:w-60"
                   />
+
+                  <select
+                    value={categoryFilter}
+                    onChange={(e) => setCategoryFilter(e.target.value)}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-44"
+                    aria-label="Filter by category"
+                  >
+                    <option value="">All categories</option>
+                    {availableCategories.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+
                   <select
                     value={sort}
                     onChange={(e) => setSort(e.target.value as any)}
@@ -502,6 +568,32 @@ export default function VendorDashboard() {
                     <option value="price_desc">Price (high → low)</option>
                   </select>
                 </div>
+
+                {availableTags.length ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {availableTags.map((t) => {
+                      const active = tagFilter.includes(t);
+                      return (
+                        <Button
+                          key={t}
+                          type="button"
+                          size="sm"
+                          variant={active ? "secondary" : "outline"}
+                          onClick={() =>
+                            setTagFilter((prev) => (active ? prev.filter((x) => x !== t) : [...prev, t]))
+                          }
+                        >
+                          #{t}
+                        </Button>
+                      );
+                    })}
+                    {tagFilter.length ? (
+                      <Button type="button" size="sm" variant="outline" onClick={() => setTagFilter([])}>
+                        Clear tags
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-3 grid gap-2">
@@ -641,6 +733,14 @@ export default function VendorDashboard() {
             <div className="space-y-2">
               <p className="text-sm font-semibold text-muted-foreground">Unit</p>
               <Input value={editUnit} onChange={(e) => setEditUnit(e.target.value)} placeholder="kg / piece / dozen" />
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-muted-foreground">Category</p>
+              <Input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} placeholder="fruit" />
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-muted-foreground">Tags (comma separated)</p>
+              <Input value={editTags} onChange={(e) => setEditTags(e.target.value)} placeholder="fresh, organic" />
             </div>
           </div>
 
