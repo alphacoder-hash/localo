@@ -3,9 +3,20 @@ import { useQuery } from "@tanstack/react-query";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/providers/AuthProvider";
+import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -60,7 +71,10 @@ function orderTotal(items: OrderItemRow[]) {
 
 export default function CustomerOrders() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [selected, setSelected] = useState<OrderRow | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   const ordersQuery = useQuery({
     queryKey: ["customer_orders", user?.id],
@@ -228,10 +242,79 @@ export default function CustomerOrders() {
           ) : null}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelected(null)}>
-              Close
-            </Button>
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              {selected && (selected.status === "placed" || selected.status === "accepted") ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCancelOpen(true)}
+                  disabled={cancelBusy}
+                >
+                  Cancel order
+                </Button>
+              ) : (
+                <div />
+              )}
+
+              <Button variant="outline" onClick={() => setSelected(null)}>
+                Close
+              </Button>
+            </div>
           </DialogFooter>
+
+          <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Cancel this order?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  You can only cancel before the vendor starts preparing. This will mark the order as cancelled.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={cancelBusy}>Keep order</AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={cancelBusy}
+                  onClick={async () => {
+                    if (!selected) return;
+                    const canCancel = selected.status === "placed" || selected.status === "accepted";
+                    if (!canCancel) {
+                      toast({
+                        title: "Can’t cancel",
+                        description: "This order can no longer be cancelled.",
+                        variant: "destructive",
+                      });
+                      setCancelOpen(false);
+                      return;
+                    }
+
+                    setCancelBusy(true);
+                    try {
+                      const { error } = await supabase
+                        .from("orders")
+                        .update({ status: "cancelled" })
+                        .eq("id", selected.id);
+                      if (error) throw error;
+
+                      toast({ title: "Order cancelled" });
+                      setSelected((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
+                      ordersQuery.refetch();
+                      setCancelOpen(false);
+                    } catch (e: any) {
+                      toast({
+                        title: "Cancel failed",
+                        description: e?.message ?? "Please try again",
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setCancelBusy(false);
+                    }
+                  }}
+                >
+                  {cancelBusy ? "Cancelling…" : "Yes, cancel"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </DialogContent>
       </Dialog>
     </div>
