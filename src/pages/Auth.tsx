@@ -16,17 +16,21 @@ const authSchema = z.object({
 
 type Mode = "login" | "signup";
 
+const isDev = import.meta.env.MODE !== "production";
+
 export default function Auth() {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [postAuthPath, setPostAuthPath] = useState<string | null>(null);
   const { toast } = useToast();
 
   const navigate = useNavigate();
   const location = useLocation() as unknown as { state?: { from?: string } };
 
-  const target = useMemo(() => location.state?.from ?? "/", [location.state]);
+  const fallbackTarget = useMemo(() => location.state?.from ?? "/", [location.state]);
+  const target = postAuthPath ?? fallbackTarget;
 
   const submit = async () => {
     const parsed = authSchema.safeParse({ email, password });
@@ -130,6 +134,22 @@ export default function Auth() {
           <Button variant="hero" className="w-full" onClick={submit} disabled={loading}>
             {loading ? "Please wait…" : mode === "login" ? "Login" : "Create account"}
           </Button>
+
+          {isDev && (
+            <button
+              type="button"
+              className="text-left text-sm text-muted-foreground underline-offset-4 hover:underline"
+              onClick={() => {
+                setPostAuthPath("/admin-setup");
+                toast({
+                  title: "Dev shortcut enabled",
+                  description: "After login you’ll be sent to Admin setup.",
+                });
+              }}
+            >
+              Developer? Continue to Admin setup after login
+            </button>
+          )}
 
           <p className="text-sm text-muted-foreground">
             Vendor phone OTP is part of the onboarding flow next.
