@@ -439,9 +439,14 @@ export default function VendorDashboard() {
           <p className="text-sm font-semibold text-muted-foreground">Vendor dashboard</p>
           <h1 className="mt-2 font-display text-4xl leading-tight">{vendor.shop_name}</h1>
         </div>
-        <Button asChild variant="outline">
-          <Link to="/vendor/apply">Edit application</Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <Link to="/vendor/orders">Orders</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/vendor/apply">Edit application</Link>
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -584,9 +589,6 @@ export default function VendorDashboard() {
                 />
                 <Button variant="hero" className="w-full" onClick={addItem}>
                   Add
-                </Button>
-                <Button variant="outline" className="w-full" onClick={requestUpgrade} disabled={plan?.upgrade_requested}>
-                  {plan?.upgrade_requested ? "Upgrade requested" : "Request upgrade"}
                 </Button>
               </div>
             </div>
