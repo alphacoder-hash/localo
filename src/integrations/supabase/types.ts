@@ -137,6 +137,51 @@ export type Database = {
           },
         ]
       }
+      otp_send_requests: {
+        Row: {
+          created_at: string
+          id: string
+          phone_e164: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          phone_e164: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          phone_e164?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      phone_verifications: {
+        Row: {
+          created_at: string
+          id: string
+          phone_e164: string
+          user_id: string
+          verified_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          phone_e164: string
+          user_id: string
+          verified_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          phone_e164?: string
+          user_id?: string
+          verified_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
