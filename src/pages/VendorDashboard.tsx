@@ -134,8 +134,29 @@ export default function VendorDashboard() {
   const limit = plan?.catalog_limit ?? 5;
   const count = catalogQuery.data?.length ?? 0;
 
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<"name" | "stock" | "price_asc" | "price_desc">("stock");
+
+  const filteredAndSortedItems = useMemo(() => {
+    const items = [...(catalogQuery.data ?? [])];
+
+    const q = search.trim().toLowerCase();
+    const filtered = q ? items.filter((it) => it.title.toLowerCase().includes(q)) : items;
+
+    filtered.sort((a, b) => {
+      if (sort === "stock") {
+        if (a.in_stock !== b.in_stock) return a.in_stock ? -1 : 1;
+        return a.title.localeCompare(b.title);
+      }
+      if (sort === "name") return a.title.localeCompare(b.title);
+      if (sort === "price_asc") return a.price_inr - b.price_inr;
+      return b.price_inr - a.price_inr;
+    });
+
+    return filtered;
+  }, [catalogQuery.data, search, sort]);
+
   const toggleOnline = async () => {
-    if (!vendor) return;
     const next = !vendor.is_online;
     const { error } = await supabase.from("vendors").update({ is_online: next }).eq("id", vendor.id);
     if (error) {
@@ -459,15 +480,43 @@ export default function VendorDashboard() {
             </div>
 
             <div className="md:col-span-2">
-              <p className="text-sm font-semibold text-muted-foreground">Your items</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <p className="text-sm font-semibold text-muted-foreground">Your items</p>
+
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search items…"
+                    className="sm:w-60"
+                  />
+                  <select
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value as any)}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-52"
+                    aria-label="Sort catalog"
+                  >
+                    <option value="stock">In-stock first</option>
+                    <option value="name">Name (A–Z)</option>
+                    <option value="price_asc">Price (low → high)</option>
+                    <option value="price_desc">Price (high → low)</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="mt-3 grid gap-2">
                 {(catalogQuery.data ?? []).length === 0 ? (
                   <div className="rounded-xl border bg-card p-6 text-center">
                     <p className="font-semibold">No items yet</p>
                     <p className="mt-1 text-sm text-muted-foreground">Add your first item to start receiving orders.</p>
                   </div>
+                ) : filteredAndSortedItems.length === 0 ? (
+                  <div className="rounded-xl border bg-card p-6 text-center">
+                    <p className="font-semibold">No matches</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Try a different search or sort.</p>
+                  </div>
                 ) : (
-                  (catalogQuery.data ?? []).map((it) => {
+                  filteredAndSortedItems.map((it) => {
                     const img = getCatalogImagePublicUrl(it.photo_url);
                     const busy =
                       uploadingItemId === it.id || togglingItemId === it.id || deletingItemId === it.id || savingEdit;
@@ -542,10 +591,7 @@ export default function VendorDashboard() {
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction
-                                    onClick={() => deleteItem(it)}
-                                    disabled={deletingItemId === it.id}
-                                  >
+                                  <AlertDialogAction onClick={() => deleteItem(it)} disabled={deletingItemId === it.id}>
                                     Delete
                                   </AlertDialogAction>
                                 </AlertDialogFooter>
