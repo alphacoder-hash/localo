@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
+import { Pencil, Trash2 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/providers/AuthProvider";
@@ -10,10 +11,34 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { getCatalogImagePublicUrl } from "@/lib/storage";
 
 const itemSchema = z.object({
   title: z.string().trim().min(2).max(60),
+  price_inr: z.coerce.number().int().min(1).max(100000),
+  unit: z.string().trim().min(1).max(20),
+});
+
+const editSchema = z.object({
   price_inr: z.coerce.number().int().min(1).max(100000),
   unit: z.string().trim().min(1).max(20),
 });
@@ -97,6 +122,13 @@ export default function VendorDashboard() {
   const [newPrice, setNewPrice] = useState<string>("");
   const [newUnit, setNewUnit] = useState("kg");
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
+
+  const [editingItem, setEditingItem] = useState<CatalogRow | null>(null);
+  const [editPrice, setEditPrice] = useState<string>("");
+  const [editUnit, setEditUnit] = useState<string>("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
   const plan = planQuery.data;
   const limit = plan?.catalog_limit ?? 5;
@@ -203,10 +235,7 @@ export default function VendorDashboard() {
   const requestUpgrade = async () => {
     if (!vendor) return;
 
-    const { error } = await supabase
-      .from("vendor_plans")
-      .update({ upgrade_requested: true })
-      .eq("vendor_id", vendor.id);
+    const { error } = await supabase.from("vendor_plans").update({ upgrade_requested: true }).eq("vendor_id", vendor.id);
 
     if (error) {
       toast({ title: "Couldn’t request upgrade", description: error.message, variant: "destructive" });
@@ -245,6 +274,69 @@ export default function VendorDashboard() {
       toast({ title: "Couldn’t upload", description: e?.message ?? "Try again", variant: "destructive" });
     } finally {
       setUploadingItemId(null);
+    }
+  };
+
+  const openEdit = (it: CatalogRow) => {
+    setEditingItem(it);
+    setEditPrice(String(it.price_inr));
+    setEditUnit(it.unit);
+  };
+
+  const saveEdit = async () => {
+    if (!editingItem) return;
+
+    const parsed = editSchema.safeParse({ price_inr: editPrice, unit: editUnit });
+    if (!parsed.success) {
+      toast({ title: "Fix item", description: parsed.error.errors[0]?.message, variant: "destructive" });
+      return;
+    }
+
+    setSavingEdit(true);
+    try {
+      const { error } = await supabase
+        .from("vendor_catalog_items")
+        .update({ price_inr: parsed.data.price_inr, unit: parsed.data.unit })
+        .eq("id", editingItem.id);
+      if (error) throw error;
+
+      toast({ title: "Item updated" });
+      setEditingItem(null);
+      catalogQuery.refetch();
+    } catch (e: any) {
+      toast({ title: "Couldn’t update", description: e?.message ?? "Try again", variant: "destructive" });
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const toggleInStock = async (it: CatalogRow) => {
+    setTogglingItemId(it.id);
+    try {
+      const { error } = await supabase
+        .from("vendor_catalog_items")
+        .update({ in_stock: !it.in_stock })
+        .eq("id", it.id);
+      if (error) throw error;
+      catalogQuery.refetch();
+    } catch (e: any) {
+      toast({ title: "Couldn’t update", description: e?.message ?? "Try again", variant: "destructive" });
+    } finally {
+      setTogglingItemId(null);
+    }
+  };
+
+  const deleteItem = async (it: CatalogRow) => {
+    setDeletingItemId(it.id);
+    try {
+      const { error } = await supabase.from("vendor_catalog_items").delete().eq("id", it.id);
+      if (error) throw error;
+      toast({ title: "Item deleted" });
+      catalogQuery.refetch();
+    } catch (e: any) {
+      toast({ title: "Couldn’t delete", description: e?.message ?? "Try again", variant: "destructive" });
+    } finally {
+      setDeletingItemId(null);
     }
   };
 
@@ -346,8 +438,17 @@ export default function VendorDashboard() {
               <p className="text-sm font-semibold text-muted-foreground">Add item</p>
               <div className="mt-3 space-y-2">
                 <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Bananas" />
-                <Input value={newPrice} onChange={(e) => setNewPrice(e.target.value)} placeholder="Price (₹)" inputMode="numeric" />
-                <Input value={newUnit} onChange={(e) => setNewUnit(e.target.value)} placeholder="Unit (kg/piece/dozen)" />
+                <Input
+                  value={newPrice}
+                  onChange={(e) => setNewPrice(e.target.value)}
+                  placeholder="Price (₹)"
+                  inputMode="numeric"
+                />
+                <Input
+                  value={newUnit}
+                  onChange={(e) => setNewUnit(e.target.value)}
+                  placeholder="Unit (kg/piece/dozen)"
+                />
                 <Button variant="hero" className="w-full" onClick={addItem}>
                   Add
                 </Button>
@@ -368,8 +469,14 @@ export default function VendorDashboard() {
                 ) : (
                   (catalogQuery.data ?? []).map((it) => {
                     const img = getCatalogImagePublicUrl(it.photo_url);
+                    const busy =
+                      uploadingItemId === it.id || togglingItemId === it.id || deletingItemId === it.id || savingEdit;
+
                     return (
-                      <div key={it.id} className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div
+                        key={it.id}
+                        className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
                         <div className="flex items-center gap-3">
                           <div className="h-12 w-12 overflow-hidden rounded-lg border bg-muted">
                             {img ? (
@@ -383,16 +490,73 @@ export default function VendorDashboard() {
                           </div>
                           <div>
                             <p className="font-semibold">{it.title}</p>
-                            <p className="text-sm text-muted-foreground">₹{it.price_inr} / {it.unit}</p>
+                            <p className="text-sm text-muted-foreground">
+                              ₹{it.price_inr} / {it.unit}
+                            </p>
                           </div>
                         </div>
 
                         <div className="flex flex-col gap-2 sm:items-end">
-                          <Badge variant={it.in_stock ? "default" : "secondary"}>{it.in_stock ? "In stock" : "Out"}</Badge>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={it.in_stock ? "default" : "secondary"}>{it.in_stock ? "In stock" : "Out"}</Badge>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => toggleInStock(it)}
+                              disabled={busy}
+                            >
+                              Toggle stock
+                            </Button>
+
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="outline"
+                              onClick={() => openEdit(it)}
+                              disabled={busy}
+                              aria-label="Edit item"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="outline"
+                                  disabled={busy}
+                                  aria-label="Delete item"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete “{it.title}”?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    This will permanently remove the item from your catalog.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => deleteItem(it)}
+                                    disabled={deletingItemId === it.id}
+                                  >
+                                    Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+
                           <Input
                             type="file"
                             accept="image/*"
-                            disabled={uploadingItemId === it.id}
+                            disabled={busy}
                             onChange={(e) => {
                               const f = e.target.files?.[0];
                               e.currentTarget.value = "";
@@ -410,6 +574,40 @@ export default function VendorDashboard() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={!!editingItem}
+        onOpenChange={(open) => {
+          if (!open) setEditingItem(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit item</DialogTitle>
+            <DialogDescription>Update price and unit for “{editingItem?.title}”.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-muted-foreground">Price (₹)</p>
+              <Input value={editPrice} onChange={(e) => setEditPrice(e.target.value)} inputMode="numeric" />
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-muted-foreground">Unit</p>
+              <Input value={editUnit} onChange={(e) => setEditUnit(e.target.value)} placeholder="kg / piece / dozen" />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingItem(null)} disabled={savingEdit}>
+              Cancel
+            </Button>
+            <Button variant="hero" onClick={saveEdit} disabled={savingEdit}>
+              Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
