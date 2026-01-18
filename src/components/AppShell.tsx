@@ -1,12 +1,16 @@
-import { Link, NavLink, Outlet } from "react-router-dom";
-import { MapPin, ShieldCheck, Store } from "lucide-react";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { LogOut, MapPin, ShieldCheck, Store } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/providers/AuthProvider";
 
 const navLinkBase =
   "rounded-md px-3 py-2 text-sm font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
 
 export function AppShell() {
+  const { user, roles, signOut } = useAuth();
+  const navigate = useNavigate();
+
   return (
     <div className="min-h-screen bg-hero">
       <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
@@ -36,14 +40,16 @@ export function AppShell() {
             >
               Become a vendor
             </NavLink>
-            <NavLink
-              to="/admin"
-              className={({ isActive }) =>
-                cn(navLinkBase, isActive && "bg-accent text-accent-foreground")
-              }
-            >
-              Admin
-            </NavLink>
+            {roles.has("admin") && (
+              <NavLink
+                to="/admin"
+                className={({ isActive }) =>
+                  cn(navLinkBase, isActive && "bg-accent text-accent-foreground")
+                }
+              >
+                Admin
+              </NavLink>
+            )}
           </nav>
 
           <div className="flex items-center gap-2">
@@ -52,11 +58,25 @@ export function AppShell() {
                 <Store className="h-4 w-4" /> Vendor
               </Link>
             </Button>
-            <Button asChild variant="hero" size="sm">
-              <Link to="/auth">
-                <ShieldCheck className="h-4 w-4" /> Login
-              </Link>
-            </Button>
+
+            {user ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  await signOut();
+                  navigate("/");
+                }}
+              >
+                <LogOut className="h-4 w-4" /> Logout
+              </Button>
+            ) : (
+              <Button asChild variant="hero" size="sm">
+                <Link to="/auth">
+                  <ShieldCheck className="h-4 w-4" /> Login
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
       </header>

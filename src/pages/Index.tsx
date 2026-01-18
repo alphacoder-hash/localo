@@ -1,31 +1,29 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { LocateFixed, MapPin, Navigation, ShoppingBasket, Store } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-type VendorCategory =
-  | "Fruit & Veg"
-  | "Tea & Snacks"
-  | "Street Food"
-  | "Dairy"
-  | "Pharmacy";
+type VendorType = "moving_stall" | "fixed_shop";
 
-type VendorType = "moving" | "fixed";
-
-type VendorLite = {
+type VendorPublic = {
   id: string;
-  name: string;
-  category: VendorCategory;
-  vendorType: VendorType;
-  isOnline: boolean;
-  updatedToday: boolean;
-  lat: number;
-  lng: number;
-  note?: string;
+  shop_name: string;
+  primary_category: string;
+  vendor_type: VendorType;
+  is_online: boolean;
+  last_location_updated_at: string | null;
+  location_lat: number | null;
+  location_lng: number | null;
+  opening_note: string | null;
+  city: string | null;
+  state: string | null;
 };
 
 type GeoPoint = { lat: number; lng: number };
@@ -34,89 +32,72 @@ function haversineKm(a: GeoPoint, b: GeoPoint) {
   const R = 6371;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;
   const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const sa = Math.sin(dLat / 2) ** 2 +
+  const sa =
+    Math.sin(dLat / 2) ** 2 +
     Math.cos((a.lat * Math.PI) / 180) *
       Math.cos((b.lat * Math.PI) / 180) *
       Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(sa)));
 }
 
-const sampleVendors: VendorLite[] = [
-  {
-    id: "v-kr",
-    name: "Kaveri Fruit Cart",
-    category: "Fruit & Veg",
-    vendorType: "moving",
-    isOnline: true,
-    updatedToday: true,
-    lat: 12.9716,
-    lng: 77.5946,
-    note: "Near metro gate",
-  },
-  {
-    id: "v-tea",
-    name: "Chai Junction",
-    category: "Tea & Snacks",
-    vendorType: "fixed",
-    isOnline: true,
-    updatedToday: false,
-    lat: 12.9753,
-    lng: 77.6057,
-    note: "Opp. SBI ATM",
-  },
-  {
-    id: "v-dairy",
-    name: "Morning Dairy",
-    category: "Dairy",
-    vendorType: "fixed",
-    isOnline: false,
-    updatedToday: true,
-    lat: 12.9632,
-    lng: 77.5973,
-  },
-  {
-    id: "v-street",
-    name: "Tawa Bites",
-    category: "Street Food",
-    vendorType: "moving",
-    isOnline: true,
-    updatedToday: true,
-    lat: 12.9681,
-    lng: 77.61,
-    note: "Near bus stop",
-  },
-];
-
-const categories: (VendorCategory | "All")[] = [
-  "All",
-  "Fruit & Veg",
-  "Tea & Snacks",
-  "Street Food",
-  "Dairy",
-  "Pharmacy",
-];
-
 const Index = () => {
   const [coords, setCoords] = useState<GeoPoint | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [radiusKm, setRadiusKm] = useState(3);
-  const [category, setCategory] = useState<(typeof categories)[number]>("All");
+  const [category, setCategory] = useState<string>("All");
   const [onlineOnly, setOnlineOnly] = useState(true);
   const [q, setQ] = useState("");
 
+  const vendorsQuery = useQuery({
+    queryKey: ["vendors_public"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("vendors_public")
+        .select(
+          "id, shop_name, primary_category, vendor_type, is_online, last_location_updated_at, location_lat, location_lng, opening_note, city, state",
+        )
+        .limit(200);
+      if (error) throw error;
+      return (data ?? []) as VendorPublic[];
+    },
+  });
+
+  const categories = useMemo(() => {
+    const set = new Set<string>(["All"]);
+    (vendorsQuery.data ?? []).forEach((v) => set.add(v.primary_category));
+    return Array.from(set);
+  }, [vendorsQuery.data]);
+
   const withDistance = useMemo(() => {
     const origin = coords ?? { lat: 12.9716, lng: 77.5946 };
-    return sampleVendors
-      .map((v) => ({ ...v, distanceKm: haversineKm(origin, v) }))
+    const now = Date.now();
+
+    return (vendorsQuery.data ?? [])
+      .filter((v) => v.location_lat != null && v.location_lng != null)
+      .map((v) => {
+        const distanceKm = haversineKm(origin, {
+          lat: v.location_lat as number,
+          lng: v.location_lng as number,
+        });
+
+        const updatedMs = v.last_location_updated_at
+          ? new Date(v.last_location_updated_at).getTime()
+          : 0;
+        const updatedToday = updatedMs
+          ? now - updatedMs < 24 * 60 * 60 * 1000
+          : false;
+
+        return { ...v, distanceKm, updatedToday };
+      })
       .filter((v) => v.distanceKm <= radiusKm)
-      .filter((v) => (category === "All" ? true : v.category === category))
-      .filter((v) => (onlineOnly ? v.isOnline : true))
+      .filter((v) => (category === "All" ? true : v.primary_category === category))
+      .filter((v) => (onlineOnly ? v.is_online : true))
       .filter((v) => {
-        const hay = `${v.name} ${v.category} ${v.note ?? ""}`.toLowerCase();
+        const hay = `${v.shop_name} ${v.primary_category} ${v.opening_note ?? ""}`.toLowerCase();
         return hay.includes(q.trim().toLowerCase());
       })
       .sort((a, b) => a.distanceKm - b.distanceKm);
-  }, [coords, radiusKm, category, onlineOnly, q]);
+  }, [vendorsQuery.data, coords, radiusKm, category, onlineOnly, q]);
 
   const nearestId = withDistance[0]?.id;
 
@@ -133,7 +114,7 @@ const Index = () => {
         setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
       },
       () => {
-        setGeoError("Couldn’t access your location. You can still search with the default city.");
+        setGeoError("Couldn’t access your location. You can still browse with the default city.");
       },
       { enableHighAccuracy: true, timeout: 9000, maximumAge: 5000 },
     );
@@ -163,9 +144,7 @@ const Index = () => {
             </Button>
           </div>
 
-          {geoError && (
-            <p className="mt-3 text-sm text-muted-foreground">{geoError}</p>
-          )}
+          {geoError && <p className="mt-3 text-sm text-muted-foreground">{geoError}</p>}
 
           {coords && (
             <div className="mt-4 inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-sm shadow-sm">
@@ -237,7 +216,11 @@ const Index = () => {
           <div>
             <h2 className="font-display text-2xl">Nearby vendors</h2>
             <p className="text-sm text-muted-foreground">
-              Demo data for now — in step 3+ we’ll load real vendors from the backend.
+              {vendorsQuery.isLoading
+                ? "Loading approved vendors…"
+                : vendorsQuery.data?.length
+                  ? "Showing approved vendors near you."
+                  : "No approved vendors yet — be the first to register."}
             </p>
           </div>
           <Button asChild variant="ghost" className="hidden sm:inline-flex">
@@ -267,13 +250,6 @@ const Index = () => {
                 {v.id === nearestId && (
                   <div
                     aria-hidden
-                    className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-primary/30"
-                  />
-                )}
-
-                {v.id === nearestId && (
-                  <div
-                    aria-hidden
                     className="pointer-events-none absolute left-5 top-5 h-6 w-6 rounded-full bg-primary/20 ring-1 ring-primary/30 animate-pulse-ring"
                   />
                 )}
@@ -281,24 +257,24 @@ const Index = () => {
                 <CardContent className="p-6">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-xs font-semibold text-muted-foreground">{v.category}</p>
-                      <h3 className="mt-1 font-display text-2xl leading-tight">{v.name}</h3>
-                      {v.note && <p className="mt-2 text-sm text-muted-foreground">{v.note}</p>}
+                      <p className="text-xs font-semibold text-muted-foreground">{v.primary_category}</p>
+                      <h3 className="mt-1 font-display text-2xl leading-tight">{v.shop_name}</h3>
+                      {v.opening_note && (
+                        <p className="mt-2 text-sm text-muted-foreground">{v.opening_note}</p>
+                      )}
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-semibold">{v.distanceKm.toFixed(1)} km</p>
                       <div className="mt-2 flex flex-wrap justify-end gap-2">
-                        <Badge variant={v.isOnline ? "default" : "secondary"}>
-                          {v.isOnline ? "Online" : "Offline"}
+                        <Badge variant={v.is_online ? "default" : "secondary"}>
+                          {v.is_online ? "Online" : "Offline"}
                         </Badge>
                         <Badge variant="outline">
-                          {v.vendorType === "moving" ? "Moving stall" : "Fixed shop"}
+                          {v.vendor_type === "moving_stall" ? "Moving stall" : "Fixed shop"}
                         </Badge>
-                        {v.updatedToday ? (
-                          <Badge variant="secondary">Updated today</Badge>
-                        ) : (
-                          <Badge variant="secondary">Stale location</Badge>
-                        )}
+                        <Badge variant="secondary">
+                          {v.updatedToday ? "Updated today" : "Stale location"}
+                        </Badge>
                       </div>
                     </div>
                   </div>
@@ -311,7 +287,7 @@ const Index = () => {
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        const url = `https://www.google.com/maps/dir/?api=1&destination=${v.lat},${v.lng}`;
+                        const url = `https://www.google.com/maps/dir/?api=1&destination=${v.location_lat},${v.location_lng}`;
                         window.open(url, "_blank", "noopener,noreferrer");
                       }}
                     >

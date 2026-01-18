@@ -293,6 +293,51 @@ export type Database = {
           },
         ]
       }
+      vendor_plans: {
+        Row: {
+          catalog_limit: number
+          created_at: string
+          id: string
+          tier: Database["public"]["Enums"]["vendor_plan_tier"]
+          updated_at: string
+          upgrade_requested: boolean
+          vendor_id: string
+        }
+        Insert: {
+          catalog_limit?: number
+          created_at?: string
+          id?: string
+          tier?: Database["public"]["Enums"]["vendor_plan_tier"]
+          updated_at?: string
+          upgrade_requested?: boolean
+          vendor_id: string
+        }
+        Update: {
+          catalog_limit?: number
+          created_at?: string
+          id?: string
+          tier?: Database["public"]["Enums"]["vendor_plan_tier"]
+          updated_at?: string
+          upgrade_requested?: boolean
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_plans_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: true
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_plans_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: true
+            referencedRelation: "vendors_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vendors: {
         Row: {
           address_text: string | null
@@ -454,6 +499,7 @@ export type Database = {
         | "completed"
         | "cancelled"
       payment_mode: "upi" | "cash"
+      vendor_plan_tier: "free" | "pro"
       vendor_type: "fixed_shop" | "moving_stall"
       vendor_verification_status: "pending" | "approved" | "rejected"
     }
@@ -593,6 +639,7 @@ export const Constants = {
         "cancelled",
       ],
       payment_mode: ["upi", "cash"],
+      vendor_plan_tier: ["free", "pro"],
       vendor_type: ["fixed_shop", "moving_stall"],
       vendor_verification_status: ["pending", "approved", "rejected"],
     },
