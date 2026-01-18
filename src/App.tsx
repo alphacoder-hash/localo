@@ -14,6 +14,7 @@ import VendorApply from "./pages/VendorApply";
 import VendorDashboard from "./pages/VendorDashboard";
 import VendorStore from "./pages/VendorStore";
 import Admin from "./pages/Admin";
+import AdminSetup from "./pages/AdminSetup";
 import Auth from "./pages/Auth";
 
 const queryClient = new QueryClient();
@@ -45,6 +46,14 @@ const App = () => (
                 }
               />
               <Route path="/vendor/:vendorId" element={<VendorStore />} />
+              <Route
+                path="/admin-setup"
+                element={
+                  <RequireAuth>
+                    <AdminSetup />
+                  </RequireAuth>
+                }
+              />
               <Route
                 path="/admin"
                 element={
