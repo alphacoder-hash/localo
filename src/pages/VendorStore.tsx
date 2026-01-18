@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getCatalogImagePublicUrl } from "@/lib/storage";
 
 type VendorPublic = {
   id: string;
@@ -121,21 +122,32 @@ export default function VendorStore() {
             {(catalogQuery.data ?? []).length === 0 ? (
               <div className="rounded-xl border bg-card p-6 text-center">
                 <p className="font-semibold">No items yet</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  This vendor hasn’t added items.
-                </p>
+                <p className="mt-1 text-sm text-muted-foreground">This vendor hasn’t added items.</p>
               </div>
             ) : (
-              (catalogQuery.data ?? []).map((it) => (
-                <div key={it.id} className="rounded-xl border bg-card p-4">
-                  <p className="font-semibold">{it.title}</p>
-                  <p className="text-sm text-muted-foreground">₹{it.price_inr} / {it.unit}</p>
-                </div>
-              ))
+              (catalogQuery.data ?? []).map((it) => {
+                const img = getCatalogImagePublicUrl(it.photo_url);
+                return (
+                  <div key={it.id} className="flex items-center gap-3 rounded-xl border bg-card p-4">
+                    <div className="h-12 w-12 overflow-hidden rounded-lg border bg-muted">
+                      {img ? (
+                        <img
+                          src={img}
+                          alt={`${it.title} thumbnail`}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : null}
+                    </div>
+                    <div>
+                      <p className="font-semibold">{it.title}</p>
+                      <p className="text-sm text-muted-foreground">₹{it.price_inr} / {it.unit}</p>
+                    </div>
+                  </div>
+                );
+              })
             )}
-            <p className="text-sm text-muted-foreground">
-              Ordering comes next (Step 10). For now, discovery + catalog is live.
-            </p>
+            <p className="text-sm text-muted-foreground">Ordering comes next (Step 10). For now, discovery + catalog is live.</p>
           </CardContent>
         </Card>
 
@@ -150,9 +162,7 @@ export default function VendorStore() {
             <Button variant="outline" className="w-full" disabled>
               Place order (pay at pickup)
             </Button>
-            <p className="text-sm text-muted-foreground">
-              Payment is always at pickup: UPI or cash.
-            </p>
+            <p className="text-sm text-muted-foreground">Payment is always at pickup: UPI or cash.</p>
           </CardContent>
         </Card>
       </div>
