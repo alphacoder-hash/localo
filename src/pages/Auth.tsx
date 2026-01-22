@@ -14,6 +14,13 @@ const authSchema = z.object({
   password: z.string().min(8).max(72),
 });
 
+const signupSchema = authSchema.extend({
+  confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords don't match",
+  path: ["confirmPassword"],
+});
+
 type Mode = "login" | "signup";
 
 const isDev = import.meta.env.MODE !== "production";
@@ -22,6 +29,7 @@ export default function Auth() {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [postAuthPath, setPostAuthPath] = useState<string | null>(null);
   const { toast } = useToast();
@@ -29,36 +37,30 @@ export default function Auth() {
   const navigate = useNavigate();
   const location = useLocation() as unknown as { state?: { from?: string } };
 
-  const fallbackTarget = useMemo(() => location.state?.from ?? "/", [location.state]);
+  const fallbackTarget = useMemo(() => location.state?.from ?? "/profile", [location.state]);
   const target = postAuthPath ?? fallbackTarget;
 
   const submit = async () => {
-    const parsed = authSchema.safeParse({ email, password });
-    if (!parsed.success) {
-      toast({
-        title: "Check your details",
-        description: parsed.error.errors[0]?.message ?? "Invalid input",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setLoading(true);
-    try {
-      if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: parsed.data.email,
-          password: parsed.data.password,
+    if (mode === "signup") {
+      const parsed = signupSchema.safeParse({ email, password, confirmPassword });
+      if (!parsed.success) {
+        toast({
+          title: "Check your details",
+          description: parsed.error.errors[0]?.message ?? "Invalid input",
+          variant: "destructive",
         });
-        if (error) throw error;
-        toast({ title: "Logged in" });
-        navigate(target, { replace: true });
-      } else {
+        return;
+      }
+
+      setLoading(true);
+      try {
         const redirectUrl = `${window.location.origin}/`;
         const { error } = await supabase.auth.signUp({
           email: parsed.data.email,
           password: parsed.data.password,
-          options: { emailRedirectTo: redirectUrl },
+          options: {
+            emailRedirectTo: redirectUrl,
+          },
         });
         if (error) throw error;
         toast({
@@ -66,15 +68,44 @@ export default function Auth() {
           description: "You can now continue.",
         });
         navigate(target, { replace: true });
+      } catch (e: any) {
+        toast({
+          title: "Signup failed",
+          description: e?.message ?? "Please try again",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
       }
-    } catch (e: any) {
-      toast({
-        title: "Auth failed",
-        description: e?.message ?? "Please try again",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
+    } else {
+      const parsed = authSchema.safeParse({ email, password });
+      if (!parsed.success) {
+        toast({
+          title: "Check your details",
+          description: parsed.error.errors[0]?.message ?? "Invalid input",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: parsed.data.email,
+          password: parsed.data.password,
+        });
+        if (error) throw error;
+        toast({ title: "Logged in" });
+        navigate(target, { replace: true });
+      } catch (e: any) {
+        toast({
+          title: "Login failed",
+          description: e?.message ?? "Please try again",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -86,7 +117,7 @@ export default function Auth() {
           {mode === "login" ? "Welcome back" : "Create your account"}
         </h1>
         <p className="mt-3 text-muted-foreground">
-          Login is required for vendor applications, vendor dashboard, and placing orders.
+          Login is required to access your profile and dashboards.
         </p>
 
         <div className="mt-6 flex gap-2">
@@ -120,6 +151,7 @@ export default function Auth() {
               autoComplete="email"
             />
           </div>
+
           <div className="space-y-2">
             <Label>Password</Label>
             <Input
@@ -130,6 +162,19 @@ export default function Auth() {
               autoComplete={mode === "login" ? "current-password" : "new-password"}
             />
           </div>
+
+          {mode === "signup" && (
+            <div className="space-y-2">
+              <Label>Confirm Password</Label>
+              <Input
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                type="password"
+                placeholder="Re-enter password"
+                autoComplete="new-password"
+              />
+            </div>
+          )}
 
           <Button variant="hero" className="w-full" onClick={submit} disabled={loading}>
             {loading ? "Please wait…" : mode === "login" ? "Login" : "Create account"}
@@ -152,7 +197,7 @@ export default function Auth() {
           )}
 
           <p className="text-sm text-muted-foreground">
-            Vendor phone OTP is part of the onboarding flow next.
+            Vendors verify phone during onboarding.
           </p>
         </CardContent>
       </Card>

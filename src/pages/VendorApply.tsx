@@ -7,6 +7,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/providers/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
@@ -46,10 +54,31 @@ export default function VendorApply() {
   const [phoneVerified, setPhoneVerified] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [submittedVendorId, setSubmittedVendorId] = useState<string | null>(null);
 
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!user) return;
+    void supabase
+      .from("vendors")
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          toast({
+            title: "Already applied",
+            description: "You have already submitted a vendor application.",
+          });
+          navigate("/vendor/dashboard", { replace: true });
+        }
+      });
+  }, [user, navigate, toast]);
 
   const mappedType = useMemo(
     () => (vendorType === "moving" ? "moving_stall" : "fixed_shop"),
@@ -88,6 +117,24 @@ export default function VendorApply() {
   };
 
   const phoneE164 = useMemo(() => toE164India(phone), [phone]);
+
+  useEffect(() => {
+    if (!user) return;
+    const checkExisting = async () => {
+      const { data } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("owner_user_id", user.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (data) {
+        toast({ title: "Already applied", description: "Redirecting to dashboard..." });
+        navigate("/vendor/dashboard", { replace: true });
+      }
+    };
+    checkExisting();
+  }, [user, navigate, toast]);
 
   useEffect(() => {
     if (otpCooldown <= 0) return;
@@ -212,16 +259,18 @@ export default function VendorApply() {
         .from("vendor_contacts")
         .insert({ vendor_id: vendor.id, phone_e164: phoneE164 });
 
-      if (contactErr) throw contactErr;
+      if (contactErr) {
+        if ((contactErr as any)?.code === "23505") {
+          throw new Error("This phone number is already linked to another vendor account.");
+        }
+        throw contactErr;
+      }
 
       // 4) Ensure a plan row exists
       await supabase.from("vendor_plans").insert({ vendor_id: vendor.id }).throwOnError();
 
-      toast({
-        title: "Application submitted",
-        description: "Your request is pending admin approval.",
-      });
-      navigate("/vendor/dashboard", { replace: true });
+      setSubmittedVendorId(vendor.id);
+      setSuccessOpen(true);
     } catch (e: any) {
       toast({ title: "Couldn’t submit", description: e?.message ?? "Try again", variant: "destructive" });
     } finally {
@@ -231,6 +280,62 @@ export default function VendorApply() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
+      <Dialog
+        open={successOpen}
+        onOpenChange={(open) => {
+          setSuccessOpen(open);
+          if (!open) navigate("/vendor/dashboard", { replace: true });
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Application submitted successfully</DialogTitle>
+            <DialogDescription>
+              Your vendor application has been received and is now pending admin verification.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 rounded-xl border bg-card p-4">
+            <div className="flex items-start gap-3">
+              <BadgeCheck className="mt-0.5 h-5 w-5 text-primary" />
+              <div className="space-y-1">
+                <p className="text-sm font-semibold">What happens next</p>
+                <p className="text-sm text-muted-foreground">
+                  Admin will review your application within 24–48 hours. You will receive a message once your account is
+                  approved.
+                </p>
+                {submittedVendorId ? (
+                  <p className="text-xs text-muted-foreground">
+                    Application ID: <span className="font-medium">{submittedVendorId.slice(0, 8)}</span>
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSuccessOpen(false);
+                navigate("/", { replace: true });
+              }}
+            >
+              Back to home
+            </Button>
+            <Button
+              variant="hero"
+              onClick={() => {
+                setSuccessOpen(false);
+                navigate("/vendor/dashboard", { replace: true });
+              }}
+            >
+              Go to dashboard
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div>
         <p className="text-sm font-semibold text-muted-foreground">Vendor onboarding</p>
         <h1 className="mt-2 font-display text-4xl leading-tight">Apply to get verified</h1>
@@ -531,7 +636,16 @@ export default function VendorApply() {
                         setPhoneVerified(true);
                         toast({ title: "Phone verified" });
                       } catch (e: any) {
-                        toast({ title: "Invalid OTP", description: e?.message ?? "Try again", variant: "destructive" });
+                        const status = e?.context?.status as number | undefined;
+                        if (status === 409) {
+                          toast({
+                            title: "Phone already used",
+                            description: "This phone number is already linked to another account.",
+                            variant: "destructive",
+                          });
+                        } else {
+                          toast({ title: "Invalid OTP", description: e?.message ?? "Try again", variant: "destructive" });
+                        }
                       } finally {
                         setOtpVerifying(false);
                       }

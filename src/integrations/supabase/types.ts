@@ -392,6 +392,7 @@ export type Database = {
       vendors: {
         Row: {
           address_text: string | null
+          banner_image_url: string | null
           city: string | null
           created_at: string
           description: string | null
@@ -414,6 +415,7 @@ export type Database = {
         }
         Insert: {
           address_text?: string | null
+          banner_image_url?: string | null
           city?: string | null
           created_at?: string
           description?: string | null
@@ -436,6 +438,7 @@ export type Database = {
         }
         Update: {
           address_text?: string | null
+          banner_image_url?: string | null
           city?: string | null
           created_at?: string
           description?: string | null

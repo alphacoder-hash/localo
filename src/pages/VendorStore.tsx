@@ -64,6 +64,7 @@ function formatInr(amount: number) {
 const checkoutSchema = z.object({
   payment_mode: z.enum(["upi", "cash"]),
   pickup_note: z.string().trim().max(200).optional(),
+  customer_phone: z.string().trim().regex(/^\+?[1-9]\d{9,14}$/, "Enter valid phone (e.g. +91...)").optional(),
 });
 
 export default function VendorStore() {
@@ -81,6 +82,7 @@ export default function VendorStore() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("upi");
   const [pickupNote, setPickupNote] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [placing, setPlacing] = useState(false);
 
   const vendorQuery = useQuery({
@@ -182,6 +184,7 @@ export default function VendorStore() {
     const parsed = checkoutSchema.safeParse({
       payment_mode: paymentMode,
       pickup_note: pickupNote,
+      customer_phone: customerPhone || undefined,
     });
 
     if (!parsed.success) {
@@ -200,6 +203,14 @@ export default function VendorStore() {
 
     setPlacing(true);
     try {
+      // 1. Save Phone if provided (for notifications)
+      if (parsed.data.customer_phone) {
+        await supabase.from("otp_send_requests").insert({
+          user_id: user.id,
+          phone_e164: parsed.data.customer_phone,
+        });
+      }
+
       const { data: order, error: orderError } = await supabase
         .from("orders")
         .insert({
@@ -226,6 +237,11 @@ export default function VendorStore() {
 
       if (itemsError) throw itemsError;
 
+      // Trigger Notification to Vendor
+      supabase.functions.invoke("notify-whatsapp", {
+        body: { order_id: order.id, type: "new_order" },
+      });
+
       toast({
         title: "Order placed",
         description: "The vendor has received your order. Pay at pickup (UPI or cash).",
@@ -233,6 +249,7 @@ export default function VendorStore() {
 
       setCart({});
       setPickupNote("");
+      setCustomerPhone("");
       setPaymentMode("upi");
       setCheckoutOpen(false);
     } catch (e: any) {
@@ -381,7 +398,7 @@ export default function VendorStore() {
                 const qty = cart[it.id] ?? 0;
 
                 return (
-                  <div key={it.id} className="flex items-center gap-3 rounded-xl border bg-card p-4">
+                  <div key={it.id} className="hover-lift flex items-center gap-3 rounded-xl border bg-card p-4">
                     <div className="h-12 w-12 overflow-hidden rounded-lg border bg-muted">
                       {img ? (
                         <img
@@ -553,6 +570,17 @@ export default function VendorStore() {
                   rows={3}
                 />
                 <p className="text-xs text-muted-foreground">Max 200 characters.</p>
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Your Phone (for order updates)</Label>
+                <Input
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  placeholder="+919999999999"
+                  type="tel"
+                />
+                <p className="text-xs text-muted-foreground">We’ll send WhatsApp updates to this number.</p>
               </div>
             </div>
           </div>

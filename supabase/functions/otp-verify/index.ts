@@ -98,6 +98,10 @@ Deno.serve(async (req) => {
       );
 
     if (upsertErr) {
+      const code = (upsertErr as any)?.code as string | undefined;
+      if (code === "23505") {
+        return json(409, { error: "Phone already used" });
+      }
       console.error("otp-verify: failed to store verification", upsertErr);
       return json(500, { error: "Verified, but could not store verification" });
     }

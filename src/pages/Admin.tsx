@@ -58,6 +58,32 @@ type PlanRow = {
   } | null;
 };
 
+type OrderStatus = "placed" | "accepted" | "preparing" | "ready" | "completed" | "cancelled";
+type PaymentMode = "upi" | "cash";
+
+type AdminOrderItemRow = {
+  id: string;
+  title_snapshot: string;
+  unit_snapshot: string;
+  qty: number;
+  price_snapshot_inr: number;
+};
+
+type AdminOrderRow = {
+  id: string;
+  created_at: string;
+  status: OrderStatus;
+  payment_mode: PaymentMode;
+  pickup_note: string | null;
+  customer_user_id: string;
+  vendor_id: string;
+  vendors?: {
+    shop_name: string | null;
+    owner_user_id: string;
+  } | null;
+  order_items: AdminOrderItemRow[];
+};
+
 const rejectionTemplates = [
   "Selfie/photo is unclear",
   "Shop name/details incomplete",
@@ -66,22 +92,404 @@ const rejectionTemplates = [
   "Could not verify shop ownership",
 ];
 
+type AdminSection = "vendors" | "plans" | "orders";
+
+type OrderFilter = OrderStatus | "all";
+
+function formatInr(amount: number) {
+  try {
+    return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(
+      amount,
+    );
+  } catch {
+    return `₹${amount}`;
+  }
+}
+
+function orderTotal(items: AdminOrderItemRow[]) {
+  return items.reduce((sum, it) => sum + (it.price_snapshot_inr ?? 0) * (it.qty ?? 0), 0);
+}
+
+function shortId(id: string) {
+  return id ? `${id.slice(0, 8)}…${id.slice(-4)}` : "—";
+}
+
+type AdminHeaderProps = {
+  section: AdminSection;
+  q: string;
+  setQ: (v: string) => void;
+};
+
+function AdminHeader({ section, q, setQ }: AdminHeaderProps) {
+  return (
+    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p className="text-sm font-semibold text-muted-foreground">Admin</p>
+        <h1 className="mt-2 font-display text-4xl leading-tight">Operations</h1>
+        <p className="mt-3 text-muted-foreground">Verify vendors, manage plans, and handle disputes.</p>
+      </div>
+
+      <div className="w-full sm:w-80">
+        <Label className="sr-only" htmlFor="admin_search">
+          Search
+        </Label>
+        <Input
+          id="admin_search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={
+            section === "vendors" ? "Search vendor…" : section === "plans" ? "Search by shop name…" : "Search order…"
+          }
+        />
+      </div>
+    </header>
+  );
+}
+
+type VendorsSectionProps = {
+  vendorFilter: VendorFilter;
+  setVendorFilter: (v: VendorFilter) => void;
+  vendorCounts: { all: number; pending: number; approved: number; rejected: number };
+  vendorQueryLoading: boolean;
+  vendorList: VendorAdminRow[];
+  busy: Record<string, boolean>;
+  onReview: (v: VendorAdminRow) => void;
+  onApprove: (v: VendorAdminRow) => void;
+  onReject: (v: VendorAdminRow) => void;
+  onToggleOnline: (v: VendorAdminRow) => void;
+};
+
+function VendorsSection({
+  vendorFilter,
+  setVendorFilter,
+  vendorCounts,
+  vendorQueryLoading,
+  vendorList,
+  busy,
+  onReview,
+  onApprove,
+  onReject,
+  onToggleOnline,
+}: VendorsSectionProps) {
+  return (
+    <TabsContent value="vendors" className="mt-4 space-y-3">
+      <Tabs value={vendorFilter} onValueChange={(v) => setVendorFilter(v as VendorFilter)}>
+        <TabsList className="w-full justify-start">
+          <TabsTrigger value="pending">Pending ({vendorCounts.pending})</TabsTrigger>
+          <TabsTrigger value="approved">Approved ({vendorCounts.approved})</TabsTrigger>
+          <TabsTrigger value="rejected">Rejected ({vendorCounts.rejected})</TabsTrigger>
+          <TabsTrigger value="all">All ({vendorCounts.all})</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardTitle className="text-base">Vendors</CardTitle>
+          <p className="text-sm text-muted-foreground">Click a row to review.</p>
+        </CardHeader>
+        <CardContent>
+          {vendorQueryLoading ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
+          ) : vendorList.length === 0 ? (
+            <div className="py-10 text-center">
+              <p className="font-semibold">No vendors found.</p>
+              <p className="mt-2 text-sm text-muted-foreground">Try changing the filter or search query.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Shop</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>City</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {vendorList.map((v) => {
+                    const isRowBusy = !!busy[`vendor:${v.id}`];
+                    return (
+                      <TableRow key={v.id} className="cursor-pointer" onClick={() => onReview(v)}>
+                        <TableCell className="font-semibold">{v.shop_name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {v.verification_status}
+                          {v.verification_status === "approved" ? (v.is_online ? " • online" : " • offline") : ""}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {v.vendor_type === "moving_stall" ? "Moving stall" : "Fixed shop"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{v.city ?? "—"}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                            {v.verification_status === "pending" ? (
+                              <>
+                                <Button variant="hero" size="sm" disabled={isRowBusy} onClick={() => onApprove(v)}>
+                                  Approve
+                                </Button>
+                                <Button variant="outline" size="sm" disabled={isRowBusy} onClick={() => onReject(v)}>
+                                  Reject
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button variant="outline" size="sm" disabled={isRowBusy} onClick={() => onReview(v)}>
+                                  Review
+                                </Button>
+                                <Button
+                                  variant={v.is_online ? "outline" : "hero"}
+                                  size="sm"
+                                  disabled={isRowBusy || v.verification_status !== "approved"}
+                                  onClick={() => onToggleOnline(v)}
+                                >
+                                  {v.is_online ? "Set offline" : "Set online"}
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </TabsContent>
+  );
+}
+
+type PlansSectionProps = {
+  planCounts: { all: number; upgrade: number; pro: number; free: number };
+  planQueryLoading: boolean;
+  planList: PlanRow[];
+  busy: Record<string, boolean>;
+  onReview: (p: PlanRow) => void;
+  onApproveUpgrade: (p: PlanRow) => void;
+};
+
+function PlansSection({ planCounts, planQueryLoading, planList, busy, onReview, onApproveUpgrade }: PlansSectionProps) {
+  return (
+    <TabsContent value="plans" className="mt-4 space-y-3">
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Card>
+          <CardContent className="py-4">
+            <p className="text-sm text-muted-foreground">Upgrade requests</p>
+            <p className="mt-1 font-display text-2xl">{planCounts.upgrade}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <p className="text-sm text-muted-foreground">Pro</p>
+            <p className="mt-1 font-display text-2xl">{planCounts.pro}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <p className="text-sm text-muted-foreground">Free</p>
+            <p className="mt-1 font-display text-2xl">{planCounts.free}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <p className="text-sm text-muted-foreground">Total</p>
+            <p className="mt-1 font-display text-2xl">{planCounts.all}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardTitle className="text-base">Vendor plans</CardTitle>
+          <p className="text-sm text-muted-foreground">Approve upgrades and set catalog limits.</p>
+        </CardHeader>
+        <CardContent>
+          {planQueryLoading ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
+          ) : planList.length === 0 ? (
+            <div className="py-10 text-center">
+              <p className="font-semibold">No plans found.</p>
+              <p className="mt-2 text-sm text-muted-foreground">Try changing the search query.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Shop</TableHead>
+                    <TableHead>Tier</TableHead>
+                    <TableHead>Catalog limit</TableHead>
+                    <TableHead>Upgrade requested</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {planList.map((p) => {
+                    const isRowBusy = !!busy[`plan:${p.id}`];
+                    const shopName = p.vendors?.shop_name ?? p.vendor_id;
+                    return (
+                      <TableRow key={p.id} className="cursor-pointer" onClick={() => onReview(p)}>
+                        <TableCell className="font-semibold">{shopName}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{p.tier}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{p.catalog_limit}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{p.upgrade_requested ? "Yes" : "No"}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                            <Button variant="outline" size="sm" disabled={isRowBusy} onClick={() => onReview(p)}>
+                              Review
+                            </Button>
+                            <Button
+                              variant="hero"
+                              size="sm"
+                              disabled={isRowBusy || !p.upgrade_requested}
+                              onClick={() => onApproveUpgrade(p)}
+                            >
+                              Approve
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </TabsContent>
+  );
+}
+
+type OrdersSectionProps = {
+  orderFilter: OrderFilter;
+  setOrderFilter: (v: OrderFilter) => void;
+  orderCounts: Record<OrderFilter, number>;
+  ordersLoading: boolean;
+  orderList: AdminOrderRow[];
+  busy: Record<string, boolean>;
+  onReview: (o: AdminOrderRow) => void;
+};
+
+function OrdersSection({
+  orderFilter,
+  setOrderFilter,
+  orderCounts,
+  ordersLoading,
+  orderList,
+  busy,
+  onReview,
+}: OrdersSectionProps) {
+  return (
+    <TabsContent value="orders" className="mt-4 space-y-3">
+      <Tabs value={orderFilter} onValueChange={(v) => setOrderFilter(v as OrderFilter)}>
+        <TabsList className="w-full justify-start">
+          <TabsTrigger value="placed">Placed ({orderCounts.placed})</TabsTrigger>
+          <TabsTrigger value="accepted">Accepted ({orderCounts.accepted})</TabsTrigger>
+          <TabsTrigger value="preparing">Preparing ({orderCounts.preparing})</TabsTrigger>
+          <TabsTrigger value="ready">Ready ({orderCounts.ready})</TabsTrigger>
+          <TabsTrigger value="completed">Completed ({orderCounts.completed})</TabsTrigger>
+          <TabsTrigger value="cancelled">Cancelled ({orderCounts.cancelled})</TabsTrigger>
+          <TabsTrigger value="all">All ({orderCounts.all})</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <CardContent className="py-4">
+            <p className="text-sm text-muted-foreground">Total orders</p>
+            <p className="mt-1 font-display text-2xl">{orderCounts.all}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <p className="text-sm text-muted-foreground">Placed</p>
+            <p className="mt-1 font-display text-2xl">{orderCounts.placed}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <p className="text-sm text-muted-foreground">Ready</p>
+            <p className="mt-1 font-display text-2xl">{orderCounts.ready}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardTitle className="text-base">Orders</CardTitle>
+          <p className="text-sm text-muted-foreground">Click a row to review.</p>
+        </CardHeader>
+        <CardContent>
+          {ordersLoading ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
+          ) : orderList.length === 0 ? (
+            <div className="py-10 text-center">
+              <p className="font-semibold">No orders found.</p>
+              <p className="mt-2 text-sm text-muted-foreground">Try changing the filter or search query.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Order</TableHead>
+                    <TableHead>Vendor</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Payment</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orderList.map((o) => {
+                    const total = orderTotal(o.order_items ?? []);
+                    const isRowBusy = !!busy[`order:${o.id}`];
+                    return (
+                      <TableRow
+                        key={o.id}
+                        className={isRowBusy ? "cursor-not-allowed opacity-70" : "cursor-pointer"}
+                        onClick={() => (isRowBusy ? null : onReview(o))}
+                      >
+                        <TableCell className="font-semibold">#{o.id.slice(0, 8)}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{o.vendors?.shop_name ?? o.vendor_id}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{o.status}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{o.payment_mode}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{shortId(o.customer_user_id)}</TableCell>
+                        <TableCell className="text-right font-semibold">{formatInr(total)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </TabsContent>
+  );
+}
+
 export default function Admin() {
   const { toast } = useToast();
 
-  const [section, setSection] = useState<"vendors" | "plans">("vendors");
+  const [section, setSection] = useState<AdminSection>("vendors");
   const [q, setQ] = useState("");
 
-  // Vendors UI state
   const [vendorFilter, setVendorFilter] = useState<VendorFilter>("pending");
   const [selectedVendor, setSelectedVendor] = useState<VendorAdminRow | null>(null);
   const [rejectReason, setRejectReason] = useState<Record<string, string>>({});
 
-  // Plans UI state
   const [planSelected, setPlanSelected] = useState<PlanRow | null>(null);
   const [planNextLimit, setPlanNextLimit] = useState<Record<string, string>>({});
 
-  // Shared busy state
+  const [orderFilter, setOrderFilter] = useState<OrderFilter>("placed");
+  const [orderSelected, setOrderSelected] = useState<AdminOrderRow | null>(null);
+  const [orderNextStatus, setOrderNextStatus] = useState<Record<string, OrderStatus>>({});
+
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const setRowBusy = (key: string, v: boolean) => setBusy((s) => ({ ...s, [key]: v }));
 
@@ -90,7 +498,6 @@ export default function Admin() {
     if (error) console.warn("admin: failed to send notification", error);
   };
 
-  // ----------------------- Vendors -----------------------
   const vendorQuery = useQuery({
     queryKey: ["admin_vendors", vendorFilter, q, section],
     enabled: section === "vendors",
@@ -202,7 +609,6 @@ export default function Admin() {
     }
   };
 
-  // ----------------------- Plans -----------------------
   const planQuery = useQuery({
     queryKey: ["admin_plans", q, section],
     enabled: section === "plans",
@@ -236,6 +642,76 @@ export default function Admin() {
       free: all.filter((p) => p.tier === "free").length,
     };
   }, [planList]);
+
+  const ordersQuery = useQuery({
+    queryKey: ["admin_orders", q, section],
+    enabled: section === "orders",
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("orders")
+        .select(
+          "id, created_at, status, payment_mode, pickup_note, customer_user_id, vendor_id, vendors(shop_name, owner_user_id), order_items(id, title_snapshot, unit_snapshot, qty, price_snapshot_inr)",
+        )
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []) as AdminOrderRow[];
+    },
+  });
+
+  const orderCounts = useMemo(() => {
+    const base: Record<OrderFilter, number> = {
+      all: 0,
+      placed: 0,
+      accepted: 0,
+      preparing: 0,
+      ready: 0,
+      completed: 0,
+      cancelled: 0,
+    };
+    const all = ordersQuery.data ?? [];
+    base.all = all.length;
+    for (const o of all) base[o.status] = (base[o.status] ?? 0) + 1;
+    return base;
+  }, [ordersQuery.data]);
+
+  const orderList = useMemo(() => {
+    const all = ordersQuery.data ?? [];
+    const needle = q.trim().toLowerCase();
+    const filtered = orderFilter === "all" ? all : all.filter((o) => o.status === orderFilter);
+    if (!needle) return filtered;
+    return filtered.filter((o) => {
+      const vendor = (o.vendors?.shop_name ?? "").toLowerCase();
+      return (
+        o.id.toLowerCase().includes(needle) ||
+        o.customer_user_id.toLowerCase().includes(needle) ||
+        o.vendor_id.toLowerCase().includes(needle) ||
+        vendor.includes(needle)
+      );
+    });
+  }, [ordersQuery.data, orderFilter, q]);
+
+  const updateOrderStatus = async (order: AdminOrderRow, next: OrderStatus) => {
+    if (!next || next === order.status) return;
+    setRowBusy(`order:${order.id}`, true);
+    try {
+      const { error } = await supabase.from("orders").update({ status: next }).eq("id", order.id);
+      if (error) throw error;
+
+      if (order.vendors?.owner_user_id) {
+        await notify(order.vendors.owner_user_id, "Order updated", `Order #${order.id.slice(0, 8)} status: ${next}.`);
+      }
+      await notify(order.customer_user_id, "Order updated", `Order #${order.id.slice(0, 8)} status: ${next}.`);
+
+      toast({ title: "Order updated" });
+      ordersQuery.refetch();
+      setOrderSelected((s) => (s?.id === order.id ? { ...s, status: next } : s));
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e?.message ?? "Please try again", variant: "destructive" });
+    } finally {
+      setRowBusy(`order:${order.id}`, false);
+    }
+  };
 
   const approveUpgrade = async (plan: PlanRow) => {
     const nextLimitStr = (planNextLimit[plan.id] ?? "").trim();
@@ -297,213 +773,54 @@ export default function Admin() {
     }
   };
 
-  // ----------------------- UI -----------------------
   const vendorList = vendorQuery.data ?? [];
+  const planListSafe = planList;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold text-muted-foreground">Admin</p>
-          <h1 className="mt-2 font-display text-4xl leading-tight">Operations</h1>
-          <p className="mt-3 text-muted-foreground">Verify vendors and manage plans.</p>
-        </div>
-
-        <div className="w-full sm:w-80">
-          <Label className="sr-only" htmlFor="admin_search">
-            Search
-          </Label>
-          <Input
-            id="admin_search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder={section === "vendors" ? "Search vendor…" : "Search by shop name…"}
-          />
-        </div>
-      </header>
+      <AdminHeader section={section} q={q} setQ={setQ} />
 
       <Tabs value={section} onValueChange={(v) => setSection(v as any)}>
         <TabsList className="w-full justify-start">
           <TabsTrigger value="vendors">Vendors</TabsTrigger>
           <TabsTrigger value="plans">Plans & payments</TabsTrigger>
+          <TabsTrigger value="orders">Orders</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="vendors" className="mt-4 space-y-3">
-          <Tabs value={vendorFilter} onValueChange={(v) => setVendorFilter(v as VendorFilter)}>
-            <TabsList className="w-full justify-start">
-              <TabsTrigger value="pending">Pending ({vendorCounts.pending})</TabsTrigger>
-              <TabsTrigger value="approved">Approved ({vendorCounts.approved})</TabsTrigger>
-              <TabsTrigger value="rejected">Rejected ({vendorCounts.rejected})</TabsTrigger>
-              <TabsTrigger value="all">All ({vendorCounts.all})</TabsTrigger>
-            </TabsList>
-          </Tabs>
+        <VendorsSection
+          vendorFilter={vendorFilter}
+          setVendorFilter={setVendorFilter}
+          vendorCounts={vendorCounts}
+          vendorQueryLoading={vendorQuery.isLoading}
+          vendorList={vendorList}
+          busy={busy}
+          onReview={(v) => setSelectedVendor(v)}
+          onApprove={approveVendor}
+          onReject={rejectVendor}
+          onToggleOnline={toggleVendorOnline}
+        />
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-3">
-              <CardTitle className="text-base">Vendors</CardTitle>
-              <p className="text-sm text-muted-foreground">Click a row to review.</p>
-            </CardHeader>
-            <CardContent>
-              {vendorQuery.isLoading ? (
-                <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
-              ) : vendorList.length === 0 ? (
-                <div className="py-10 text-center">
-                  <p className="font-semibold">No vendors found.</p>
-                  <p className="mt-2 text-sm text-muted-foreground">Try changing the filter or search query.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Shop</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>City</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {vendorList.map((v) => {
-                        const isRowBusy = !!busy[`vendor:${v.id}`];
-                        return (
-                          <TableRow key={v.id} className="cursor-pointer" onClick={() => setSelectedVendor(v)}>
-                            <TableCell className="font-semibold">{v.shop_name}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {v.verification_status}
-                              {v.verification_status === "approved" ? (v.is_online ? " • online" : " • offline") : ""}
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {v.vendor_type === "moving_stall" ? "Moving stall" : "Fixed shop"}
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{v.city ?? "—"}</TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                                {v.verification_status === "pending" ? (
-                                  <>
-                                    <Button variant="hero" size="sm" disabled={isRowBusy} onClick={() => approveVendor(v)}>
-                                      Approve
-                                    </Button>
-                                    <Button variant="outline" size="sm" disabled={isRowBusy} onClick={() => rejectVendor(v)}>
-                                      Reject
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Button variant="outline" size="sm" disabled={isRowBusy} onClick={() => setSelectedVendor(v)}>
-                                      Review
-                                    </Button>
-                                    <Button
-                                      variant={v.is_online ? "outline" : "hero"}
-                                      size="sm"
-                                      disabled={isRowBusy || v.verification_status !== "approved"}
-                                      onClick={() => toggleVendorOnline(v)}
-                                    >
-                                      {v.is_online ? "Set offline" : "Set online"}
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <PlansSection
+          planCounts={planCounts}
+          planQueryLoading={planQuery.isLoading}
+          planList={planListSafe}
+          busy={busy}
+          onReview={(p) => setPlanSelected(p)}
+          onApproveUpgrade={approveUpgrade}
+        />
 
-        <TabsContent value="plans" className="mt-4 space-y-3">
-          <div className="grid gap-4 sm:grid-cols-4">
-            <Card>
-              <CardContent className="py-4">
-                <p className="text-sm text-muted-foreground">Upgrade requests</p>
-                <p className="mt-1 font-display text-2xl">{planCounts.upgrade}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="py-4">
-                <p className="text-sm text-muted-foreground">Pro</p>
-                <p className="mt-1 font-display text-2xl">{planCounts.pro}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="py-4">
-                <p className="text-sm text-muted-foreground">Free</p>
-                <p className="mt-1 font-display text-2xl">{planCounts.free}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="py-4">
-                <p className="text-sm text-muted-foreground">Total</p>
-                <p className="mt-1 font-display text-2xl">{planCounts.all}</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-3">
-              <CardTitle className="text-base">Vendor plans</CardTitle>
-              <p className="text-sm text-muted-foreground">Approve upgrades and set catalog limits.</p>
-            </CardHeader>
-            <CardContent>
-              {planQuery.isLoading ? (
-                <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
-              ) : planList.length === 0 ? (
-                <div className="py-10 text-center">
-                  <p className="font-semibold">No plans found.</p>
-                  <p className="mt-2 text-sm text-muted-foreground">Try changing the search query.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Shop</TableHead>
-                        <TableHead>Tier</TableHead>
-                        <TableHead>Catalog limit</TableHead>
-                        <TableHead>Upgrade requested</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {planList.map((p) => {
-                        const isRowBusy = !!busy[`plan:${p.id}`];
-                        const shopName = p.vendors?.shop_name ?? p.vendor_id;
-                        return (
-                          <TableRow key={p.id} className="cursor-pointer" onClick={() => setPlanSelected(p)}>
-                            <TableCell className="font-semibold">{shopName}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{p.tier}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{p.catalog_limit}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{p.upgrade_requested ? "Yes" : "No"}</TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                                <Button variant="outline" size="sm" disabled={isRowBusy} onClick={() => setPlanSelected(p)}>
-                                  Review
-                                </Button>
-                                <Button
-                                  variant="hero"
-                                  size="sm"
-                                  disabled={isRowBusy || !p.upgrade_requested}
-                                  onClick={() => approveUpgrade(p)}
-                                >
-                                  Approve
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <OrdersSection
+          orderFilter={orderFilter}
+          setOrderFilter={setOrderFilter}
+          orderCounts={orderCounts}
+          ordersLoading={ordersQuery.isLoading}
+          orderList={orderList}
+          busy={busy}
+          onReview={(o) => {
+            setOrderSelected(o);
+            setOrderNextStatus((s) => ({ ...s, [o.id]: o.status }));
+          }}
+        />
       </Tabs>
 
       <VendorReviewDialog
@@ -531,6 +848,18 @@ export default function Admin() {
         setNextLimit={(v) => planSelected && setPlanNextLimit((s) => ({ ...s, [planSelected.id]: v }))}
         onApprove={planSelected ? () => approveUpgrade(planSelected) : undefined}
         onClearRequest={planSelected ? () => clearUpgradeRequest(planSelected) : undefined}
+      />
+
+      <OrderReviewDialog
+        open={!!orderSelected}
+        order={orderSelected}
+        onOpenChange={(o) => !o && setOrderSelected(null)}
+        busy={orderSelected ? !!busy[`order:${orderSelected.id}`] : false}
+        nextStatus={orderSelected ? orderNextStatus[orderSelected.id] ?? orderSelected.status : "placed"}
+        setNextStatus={(v) => orderSelected && setOrderNextStatus((s) => ({ ...s, [orderSelected.id]: v }))}
+        onUpdate={() =>
+          orderSelected ? updateOrderStatus(orderSelected, orderNextStatus[orderSelected.id] ?? orderSelected.status) : null
+        }
       />
     </div>
   );
@@ -722,6 +1051,108 @@ function PlanReviewDialog(props: {
               Clear request
             </Button>
           ) : null}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function OrderReviewDialog(props: {
+  open: boolean;
+  order: AdminOrderRow | null;
+  onOpenChange: (open: boolean) => void;
+  busy: boolean;
+  nextStatus: OrderStatus;
+  setNextStatus: (v: OrderStatus) => void;
+  onUpdate?: () => void;
+}) {
+  const order = props.order;
+  const total = order ? orderTotal(order.order_items ?? []) : 0;
+  const vendorName = order?.vendors?.shop_name ?? order?.vendor_id ?? "Vendor";
+
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Order #{order?.id.slice(0, 8)}</DialogTitle>
+          <DialogDescription>
+            {vendorName}
+            {order?.created_at ? ` • ${new Date(order.created_at).toLocaleString()}` : ""}
+          </DialogDescription>
+        </DialogHeader>
+
+        {order ? (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border bg-card p-4">
+                <p className="text-sm font-semibold">Status</p>
+                <p className="mt-1 text-sm text-muted-foreground">{order.status}</p>
+              </div>
+              <div className="rounded-xl border bg-card p-4">
+                <p className="text-sm font-semibold">Payment</p>
+                <p className="mt-1 text-sm text-muted-foreground">{order.payment_mode}</p>
+              </div>
+              <div className="rounded-xl border bg-card p-4">
+                <p className="text-sm font-semibold">Customer</p>
+                <p className="mt-1 text-sm text-muted-foreground">{shortId(order.customer_user_id)}</p>
+              </div>
+            </div>
+
+            {order.pickup_note ? (
+              <div className="rounded-xl border bg-card p-4">
+                <p className="text-sm font-semibold">Pickup note</p>
+                <p className="mt-1 text-sm text-muted-foreground">{order.pickup_note}</p>
+              </div>
+            ) : null}
+
+            <div className="rounded-xl border bg-card p-4">
+              <p className="text-sm font-semibold">Items</p>
+              <div className="mt-3 grid gap-2">
+                {(order.order_items ?? []).map((it) => (
+                  <div key={it.id} className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{it.title_snapshot}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {it.qty} × {it.unit_snapshot}
+                      </p>
+                    </div>
+                    <p className="text-sm font-semibold">{formatInr((it.price_snapshot_inr ?? 0) * (it.qty ?? 0))}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex items-center justify-between border-t pt-3">
+                <p className="text-sm font-semibold">Total</p>
+                <p className="text-sm font-semibold">{formatInr(total)}</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="admin_order_status">Update status</Label>
+              <select
+                id="admin_order_status"
+                value={props.nextStatus}
+                onChange={(e) => props.setNextStatus(e.target.value as OrderStatus)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                aria-label="Update order status"
+              >
+                <option value="placed">placed</option>
+                <option value="accepted">accepted</option>
+                <option value="preparing">preparing</option>
+                <option value="ready">ready</option>
+                <option value="completed">completed</option>
+                <option value="cancelled">cancelled</option>
+              </select>
+            </div>
+          </div>
+        ) : null}
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="outline" onClick={() => props.onOpenChange(false)} disabled={props.busy}>
+            Close
+          </Button>
+          <Button variant="hero" onClick={props.onUpdate} disabled={props.busy || !order}>
+            Update status
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

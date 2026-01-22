@@ -22,18 +22,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_, nextSession) => {
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
-      setRoles(new Set());
 
       if (nextSession?.user) {
-        setTimeout(() => {
-          void supabase
-            .from("user_roles")
-            .select("role")
-            .eq("user_id", nextSession.user.id)
-            .then(({ data }) => {
-              setRoles(new Set((data ?? []).map((r) => r.role)));
-            });
-        }, 0);
+        setLoading(true);
+        void supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", nextSession.user.id)
+          .then(({ data }) => {
+            setRoles(new Set((data ?? []).map((r) => r.role)));
+            setLoading(false);
+          });
+      } else {
+        setRoles(new Set());
+        setLoading(false);
       }
     });
 
@@ -42,16 +44,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(data.session?.user ?? null);
 
       if (data.session?.user) {
+        setLoading(true);
         void supabase
           .from("user_roles")
           .select("role")
           .eq("user_id", data.session.user.id)
           .then(({ data: rolesData }) => {
             setRoles(new Set((rolesData ?? []).map((r) => r.role)));
+            setLoading(false);
           });
+      } else {
+        setLoading(false);
       }
-
-      setLoading(false);
     });
 
     return () => {

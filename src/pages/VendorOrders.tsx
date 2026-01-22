@@ -103,6 +103,7 @@ export default function VendorOrders() {
         .from("vendors")
         .select("id, shop_name")
         .eq("owner_user_id", user!.id)
+        .limit(1)
         .maybeSingle();
       if (error) throw error;
       return data as VendorRow | null;
@@ -271,6 +272,11 @@ export default function VendorOrders() {
                               .update({ status: next })
                               .eq("id", selected.id);
                             if (error) throw error;
+
+                            // Notify customer
+                            supabase.functions.invoke("notify-whatsapp", {
+                              body: { order_id: selected.id, type: "status_update" },
+                            });
 
                             toast({ title: "Status updated", description: `Marked as ${next}.` });
                             setSelected((prev) => (prev ? { ...prev, status: next } : prev));
