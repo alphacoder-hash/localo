@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { Pencil, Trash2, QrCode, Share2, Copy, Check, Camera, Clock, MessageCircle, MapPin } from "lucide-react";
 import QRCode from "react-qr-code";
@@ -120,7 +120,7 @@ function VendorHeaderCard({
   pendingOrders,
 }: VendorHeaderCardProps) {
   return (
-    <Card className="overflow-hidden" id="vendor-header-card">
+    <Card className="overflow-hidden">
       <div className="relative h-40 w-full bg-muted">
         {bannerUrl ? (
           <img src={bannerUrl} alt="Shop banner" className="h-full w-full object-cover" />
@@ -192,7 +192,7 @@ function VendorHeaderCard({
               </Button>
             )}
             <Button asChild variant="hero">
-              <Link to="/vendor/orders" id="vendor-orders-link">
+              <Link to="/vendor/orders">
                 Orders
                 {pendingOrders ? (
                   <Badge variant="secondary" className="ml-2 bg-white text-primary hover:bg-white">
@@ -285,11 +285,11 @@ function StatusCard({ vendor, statusBadge, isBusy, busyBackAt, onOpen, onClose }
           </p>
         </div>
         {vendor.is_online ? (
-          <Button variant="outline" onClick={onClose} id="vendor-toggle-open">
+          <Button variant="outline" onClick={onClose}>
             Close shop
           </Button>
         ) : (
-          <Button variant="hero" onClick={onOpen} id="vendor-toggle-open">
+          <Button variant="hero" onClick={onOpen}>
             Open shop
           </Button>
         )}
@@ -322,7 +322,7 @@ function QuickActionsCard({
   onShareShopWhatsApp,
 }: QuickActionsCardProps) {
   return (
-    <Card id="vendor-quick-actions">
+    <Card>
       <CardHeader>
         <CardTitle className="text-base">Quick actions</CardTitle>
       </CardHeader>
@@ -434,8 +434,8 @@ export default function VendorDashboard({ embedded = false }: { embedded?: boole
   }, [vendor?.id]);
 
   const bannerMeta = useMemo(() => {
-    if (localBannerMeta) return localBannerMeta;
     if (vendor?.banner_image_url) return { bucket: "catalog-images", path: vendor.banner_image_url } as BannerMeta;
+    if (localBannerMeta) return localBannerMeta;
     if (latestBannerPathQuery.data) return { bucket: "catalog-images", path: latestBannerPathQuery.data } as BannerMeta;
     return null;
   }, [localBannerMeta, vendor?.banner_image_url, latestBannerPathQuery.data]);
@@ -473,6 +473,7 @@ export default function VendorDashboard({ embedded = false }: { embedded?: boole
 
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editShopName, setEditShopName] = useState("");
+  const [editContactPhone, setEditContactPhone] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
@@ -711,9 +712,18 @@ export default function VendorDashboard({ embedded = false }: { embedded?: boole
     openWhatsApp(text);
   };
 
-  const openEditProfile = () => {
+  const openEditProfile = async () => {
     if (!vendor) return;
     setEditShopName(vendor.shop_name);
+    
+    // Fetch current phone number
+    const { data } = await supabase
+      .from("vendor_contacts")
+      .select("phone_e164")
+      .eq("vendor_id", vendor.id)
+      .maybeSingle();
+      
+    setEditContactPhone(data?.phone_e164 || "");
     setIsEditingProfile(true);
   };
 
@@ -724,11 +734,37 @@ export default function VendorDashboard({ embedded = false }: { embedded?: boole
       toast({ title: "Invalid input", description: parsed.error.errors[0]?.message, variant: "destructive" });
       return;
     }
+    
+    // Validate phone if provided
+    if (editContactPhone && !/^\+?[1-9]\d{1,14}$/.test(editContactPhone)) {
+       toast({ title: "Invalid phone", description: "Please enter a valid E.164 phone number (e.g., +919876543210)", variant: "destructive" });
+       return;
+    }
 
     setSavingProfile(true);
     try {
       const { error } = await supabase.from("vendors").update({ shop_name: parsed.data.shop_name }).eq("id", vendor.id);
       if (error) throw error;
+      
+      // Update phone number
+      if (editContactPhone) {
+        const { error: phoneError } = await supabase
+          .from("vendor_contacts")
+          .upsert({ vendor_id: vendor.id, phone_e164: editContactPhone }, { onConflict: "vendor_id" });
+          
+        if (phoneError) throw phoneError;
+      } else {
+        // If empty, maybe delete? For now let's just keep it or ignore. 
+        // If user clears it, we might want to delete.
+        // Let's assume clearing means removing contact info.
+        const { error: deleteError } = await supabase
+           .from("vendor_contacts")
+           .delete()
+           .eq("vendor_id", vendor.id);
+           
+        if (deleteError) throw deleteError;
+      }
+      
       toast({ title: "Profile updated" });
       setIsEditingProfile(false);
       vendorQuery.refetch();
@@ -770,16 +806,18 @@ export default function VendorDashboard({ embedded = false }: { embedded?: boole
 
     setBannerUploading(true);
     try {
-      const ext = file.name.split(".").pop() || "jpg";
-      const path = `${user.id}/${vendor.id}-banner-${Date.now()}.${ext}`;
+      const path = `banners/${vendor.id}.jpg`;
       const bucket = "catalog-images";
 
-      const { error: uploadErr } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
+      const { error: uploadErr } = await supabase.storage
+        .from(bucket)
+        .upload(path, file, { upsert: true, contentType: file.type });
       if (uploadErr) throw uploadErr;
 
       localStorage.setItem(`vendor_banner_${vendor.id}`, JSON.stringify({ bucket, path } as BannerMeta));
 
-      await supabase.from("vendors").update({ banner_image_url: path }).eq("id", vendor.id);
+      const { error: updateErr } = await supabase.from("vendors").update({ banner_image_url: path }).eq("id", vendor.id);
+      if (updateErr) throw updateErr;
       toast({ title: "Banner updated" });
 
       vendorQuery.refetch();
@@ -834,7 +872,9 @@ export default function VendorDashboard({ embedded = false }: { embedded?: boole
       else next.add(itemId);
       try {
         localStorage.setItem(`vendor_low_stock_${vendor.id}`, JSON.stringify(Array.from(next)));
-      } catch {}
+      } catch {
+        // ignore
+      }
       return next;
     });
   };
@@ -1195,7 +1235,7 @@ export default function VendorDashboard({ embedded = false }: { embedded?: boole
               <p className="text-sm text-muted-foreground">
                 {vendor.location_notes ? `Notes: ${vendor.location_notes}` : "Update daily for moving stalls."}
               </p>
-              <Button variant="hero" className="w-full" onClick={updateLocationToday} id="vendor-update-location">
+              <Button variant="hero" className="w-full" onClick={updateLocationToday}>
                 Update location
               </Button>
             </CardContent>
@@ -1269,7 +1309,7 @@ export default function VendorDashboard({ embedded = false }: { embedded?: boole
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-3">
-            <div className="md:col-span-1" id="vendor-add-item">
+            <div className="md:col-span-1">
               <p className="text-sm font-semibold text-muted-foreground">Add item</p>
               <div className="mt-3 space-y-2">
                 <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Bananas" />
@@ -1658,6 +1698,15 @@ export default function VendorDashboard({ embedded = false }: { embedded?: boole
           <div className="space-y-2">
             <Label>Shop name</Label>
             <Input value={editShopName} onChange={(e) => setEditShopName(e.target.value)} placeholder="Shop name" />
+          </div>
+          <div className="space-y-2">
+            <Label>Contact Phone</Label>
+            <Input 
+              value={editContactPhone} 
+              onChange={(e) => setEditContactPhone(e.target.value)} 
+              placeholder="+91 98765 43210" 
+            />
+            <p className="text-xs text-muted-foreground">Enter full number with country code (e.g., +91...)</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditingProfile(false)} disabled={savingProfile}>

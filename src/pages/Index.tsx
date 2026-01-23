@@ -17,7 +17,7 @@ import {
   Store,
   Utensils,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,7 +27,9 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+import { cn, getDemoBanner } from "@/lib/utils";
+import { getCatalogImagePublicUrl } from "@/lib/storage";
+import { useGeoLocation } from "@/providers/LocationProvider";
 
 type VendorType = "moving_stall" | "fixed_shop";
 
@@ -44,6 +46,7 @@ type VendorPublic = {
   city: string | null;
   state: string | null;
   selfie_with_shop_image_url: string | null;
+  banner_image_url: string | null;
 };
 
 type GeoPoint = { lat: number; lng: number };
@@ -63,15 +66,53 @@ function haversineKm(a: GeoPoint, b: GeoPoint) {
 const Index = () => {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [coords, setCoords] = useState<GeoPoint | null>(null);
-  const [geoError, setGeoError] = useState<string | null>(null);
+  const { coords, geoError, isLocating, requestLocation, setGeoError, setCoords } = useGeoLocation();
+  const queryClient = useQueryClient();
   const [radiusKm, setRadiusKm] = useState(10);
   const [category, setCategory] = useState<string>("All");
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [q, setQ] = useState(() => searchParams.get("q") ?? "");
 
+  // Clear location on mount so user has to click "Use my location" again
+  useEffect(() => {
+    setCoords(null);
+    localStorage.removeItem("last_coords");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("vendors_public_updates")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "vendors", filter: "verification_status=eq.approved" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["vendors_public"] });
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "vendors", filter: "verification_status=eq.approved" },
+        (payload) => {
+          const nextRow = (payload as any).new as { banner_image_url?: string | null } | undefined;
+          const prevRow = (payload as any).old as { banner_image_url?: string | null } | undefined;
+
+          if (nextRow?.banner_image_url !== prevRow?.banner_image_url) {
+            queryClient.invalidateQueries({ queryKey: ["vendors_public"] });
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
   const vendorsQuery = useQuery({
     queryKey: ["vendors_public"],
+    refetchInterval: 20000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("vendors_public")
@@ -79,7 +120,11 @@ const Index = () => {
           "id, shop_name, primary_category, vendor_type, is_online, last_location_updated_at, location_lat, location_lng, opening_note, city, state, selfie_with_shop_image_url",
         )
         .limit(200);
-      if (error) throw error;
+
+      if (error) {
+        console.error("Error fetching vendors:", error);
+        return [];
+      }
       return (data ?? []) as VendorPublic[];
     },
   });
@@ -152,30 +197,11 @@ const Index = () => {
   const nearestId = withDistance[0]?.id;
   const topCategories = useMemo(() => categories.filter((c) => c !== "All").slice(0, 10), [categories]);
 
-  const requestLocation = () => {
-    setGeoError(null);
-
-    if (!navigator.geolocation) {
-      setGeoError("Location not supported on this device.");
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      },
-      () => {
-        setGeoError("Couldn’t access your location. You can still browse with the default city.");
-      },
-      { enableHighAccuracy: true, timeout: 9000, maximumAge: 5000 },
-    );
-  };
-
   return (
     <div className="space-y-10">
       <section className="grid gap-6 md:grid-cols-12 md:items-end">
         <div className="md:col-span-7">
-          <p className="text-sm font-semibold text-muted-foreground">{t("hero.tagline")}</p>
+          <p className="text-sm font-semibold text-muted-foreground">India • moving stalls + local shops</p>
           <h1 className="mt-2 font-display text-4xl leading-tight md:text-5xl">
             {t("hero.title_part1")}
             <span className="text-primary">{t("hero.title_part2")}</span>.
@@ -185,18 +211,20 @@ const Index = () => {
           </p>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Button
-              variant="hero"
-              onClick={requestLocation}
-              id="location-alert"
-              className={cn(!coords && "animate-pulse ring-4 ring-primary/20")}
-            >
-              <LocateFixed className="h-4 w-4" /> {t("hero.use_location")}
-            </Button>
-            <Button asChild variant="outline">
+            <Button asChild variant="hero">
               <Link to="/vendor/apply">
                 <Store className="h-4 w-4" /> {t("hero.register")}
               </Link>
+            </Button>
+            <Button
+              variant={!coords ? "default" : "outline"}
+              onClick={requestLocation}
+              disabled={isLocating}
+              className={cn("gap-2 transition-all", !coords && "shadow-lg scale-105 font-bold ring-4 ring-primary/30 animate-pulse")}
+              id="use-my-location-btn"
+            >
+              <LocateFixed className="h-4 w-4" />
+              {isLocating ? "Locating..." : t("hero.use_location")}
             </Button>
           </div>
 
@@ -217,12 +245,7 @@ const Index = () => {
                 {coords.lat.toFixed(3)}, {coords.lng.toFixed(3)}
               </span>
             </div>
-          ) : (
-            <div className="mt-4 inline-flex items-center gap-2 rounded-full border bg-yellow-50 px-3 py-1 text-sm text-yellow-800 shadow-sm dark:bg-yellow-900/20 dark:text-yellow-200">
-              <MapPin className="h-4 w-4 animate-bounce" />
-              <span className="font-semibold">{t("hero.location_required")}</span>
-            </div>
-          )}
+          ) : null}
 
           <div className="mt-6 flex flex-wrap gap-2">
             <Button variant="outline" className="pointer-events-none">
@@ -416,14 +439,35 @@ const Index = () => {
                   v.id === nearestId && "ring-1 ring-primary/30",
                 )}
               >
-                {v.id === nearestId && (
-                  <div
-                    aria-hidden
-                    className="pointer-events-none absolute left-5 top-5 h-6 w-6 rounded-full bg-primary/20 ring-1 ring-primary/30 animate-pulse-ring"
-                  />
-                )}
-
-                <CardContent className="p-6">
+                <CardContent className="p-0">
+                  <div className="h-32 w-full bg-muted relative">
+                     <div className="h-full w-full bg-gradient-to-r from-muted to-accent" />
+                     <img
+                       src={
+                         getCatalogImagePublicUrl(v.banner_image_url ?? `banners/${v.id}.jpg`) ||
+                         getCatalogImagePublicUrl(`banners/${v.id}.jpg`) ||
+                         ""
+                       }
+                       alt={v.shop_name}
+                       className="absolute inset-0 h-full w-full object-cover"
+                       onError={(e) => {
+                         const target = e.currentTarget;
+                         const demo = getDemoBanner(v.primary_category);
+                         if (target.src !== demo) {
+                           target.src = demo;
+                         } else {
+                           target.style.display = "none";
+                         }
+                       }}
+                     />
+                     {v.id === nearestId && (
+                      <div
+                        aria-hidden
+                        className="pointer-events-none absolute left-3 top-3 h-4 w-4 rounded-full bg-primary/20 ring-1 ring-primary/30 animate-pulse-ring z-10"
+                      />
+                    )}
+                  </div>
+                  <div className="p-6">
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -466,6 +510,7 @@ const Index = () => {
                         <Link to={`/vendor/${v.id}`}>{t("card.view")}</Link>
                       </Button>
                     </div>
+                  </div>
                   </div>
                 </CardContent>
               </Card>

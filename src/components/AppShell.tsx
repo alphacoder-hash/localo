@@ -68,7 +68,7 @@ function PrimaryNav({ items }: { items: PrimaryNavItem[] }) {
 }
 
 export function AppShell() {
-  const { user, roles, signOut, loading } = useAuth();
+  const { user, roles, signOut } = useAuth();
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -76,53 +76,17 @@ export function AppShell() {
   const [mobileSearch, setMobileSearch] = useState("");
   const searchDebounceRef = useRef<number | null>(null);
 
-  const runTour = (storageKey: string, steps: any[], force?: boolean) => {
-    try {
-      if (force) {
-        localStorage.removeItem(storageKey);
-        sessionStorage.removeItem(storageKey);
-      }
-      if (sessionStorage.getItem(storageKey)) return;
-    } catch {
-      if (!force) return;
-    }
+  const startTour = (force?: boolean) => {
+    if (force) localStorage.removeItem("nearnow_tour_seen");
+    if (localStorage.getItem("nearnow_tour_seen")) return;
 
-    let driverObj: ReturnType<typeof driver>;
-    driverObj = driver({
-      showProgress: true,
-      steps,
-      onDestroyStarted: () => {
-        try {
-          sessionStorage.setItem(storageKey, "true");
-        } catch {}
-        driverObj.destroy();
-      },
-      nextBtnText: t("tour.next"),
-      prevBtnText: t("tour.prev"),
-      doneBtnText: t("tour.done"),
-    });
-
-    driverObj.drive();
-  };
-
-  const startHomeTour = (force?: boolean) => {
-    const storageKey = `nearnow_tour_session_home_${user?.id ?? "guest"}`;
     const searchTarget = window.matchMedia("(min-width: 768px)").matches ? "#search-container" : "#mobile-search-input";
 
-    runTour(
-      storageKey,
-      [
+    const driverObj = driver({
+      showProgress: true,
+      steps: [
         {
-          element: "body",
-          popover: {
-            title: t("tour.step1_title"),
-            description: t("tour.step1_desc"),
-            side: "left",
-            align: "start",
-          },
-        },
-        {
-          element: "#location-alert",
+          element: "#use-my-location-btn",
           popover: {
             title: t("tour.step2_title"),
             description: t("tour.step2_desc"),
@@ -158,64 +122,16 @@ export function AppShell() {
           },
         },
       ],
-      force,
-    );
-  };
+      onDestroyStarted: () => {
+        localStorage.setItem("nearnow_tour_seen", "true");
+        driverObj.destroy();
+      },
+      nextBtnText: t("tour.next"),
+      prevBtnText: t("tour.prev"),
+      doneBtnText: t("tour.done"),
+    });
 
-  const startVendorTour = (vendorId: string, force?: boolean) => {
-    const storageKey = `nearnow_tour_session_vendor_${vendorId}`;
-
-    runTour(
-      storageKey,
-      [
-        {
-          element: "body",
-          popover: {
-            title: t("tour.vendor_step1_title"),
-            description: t("tour.vendor_step1_desc"),
-            side: "left",
-            align: "start",
-          },
-        },
-        {
-          element: "#vendor-toggle-open",
-          popover: {
-            title: t("tour.vendor_step2_title"),
-            description: t("tour.vendor_step2_desc"),
-            side: "bottom",
-            align: "start",
-          },
-        },
-        {
-          element: "#vendor-quick-actions",
-          popover: {
-            title: t("tour.vendor_step3_title"),
-            description: t("tour.vendor_step3_desc"),
-            side: "top",
-            align: "start",
-          },
-        },
-        {
-          element: "#vendor-update-location",
-          popover: {
-            title: t("tour.vendor_step4_title"),
-            description: t("tour.vendor_step4_desc"),
-            side: "top",
-            align: "start",
-          },
-        },
-        {
-          element: "#vendor-add-item",
-          popover: {
-            title: t("tour.vendor_step5_title"),
-            description: t("tour.vendor_step5_desc"),
-            side: "right",
-            align: "start",
-          },
-        },
-      ],
-      force,
-    );
+    driverObj.drive();
   };
 
   const vendorNavQuery = useQuery({
@@ -228,7 +144,10 @@ export function AppShell() {
         .eq("owner_user_id", user!.id)
         .limit(1)
         .maybeSingle();
-      if (error) throw error;
+      if (error) {
+        console.error("Error checking vendor status:", error);
+        return null;
+      }
       return data as { id: string } | null;
     },
     retry: false,
@@ -236,7 +155,6 @@ export function AppShell() {
 
   const hasVendor = !!vendorNavQuery.data;
   const isAdmin = roles.has("admin");
-  const vendorId = vendorNavQuery.data?.id ?? null;
 
   const primaryItems: PrimaryNavItem[] = [
     { to: "/", label: t("nav.discover"), end: true },
@@ -284,75 +202,43 @@ export function AppShell() {
     const params = new URLSearchParams(location.search);
     const q = params.get("q") ?? "";
     setMobileSearch((prev) => (prev === q ? prev : q));
-  }, [location.search]);
+  }, [location.search, location.pathname]);
 
   useEffect(() => {
     if (location.pathname !== "/") return;
     const params = new URLSearchParams(location.search);
     if (params.get("tour") !== "1") return;
-    try {
-      localStorage.removeItem("nearnow_tour_seen");
-      sessionStorage.removeItem(`nearnow_tour_session_home_${user?.id ?? "guest"}`);
-    } catch {}
+    localStorage.removeItem("nearnow_tour_seen");
     params.delete("tour");
     const next = params.toString();
     navigate(next ? `/?${next}` : "/", { replace: true });
-  }, [location.pathname, location.search, navigate, user?.id]);
+  }, [location.pathname, location.search, navigate]);
 
   useEffect(() => {
-    if (loading) return;
+    if (location.pathname !== "/") return;
+    if (localStorage.getItem("nearnow_tour_seen")) return;
 
-    if (location.pathname === "/") {
-      const searchTarget = window.matchMedia("(min-width: 768px)").matches ? "#search-container" : "#mobile-search-input";
-      const required = ["#location-alert", "#filters-container", "#vendors", searchTarget];
+    let attempts = 0;
+    const tick = () => {
+      attempts += 1;
+      const hasLocationBtn = !!document.querySelector("#use-my-location-btn");
+      const hasFilters = !!document.querySelector("#filters-container");
+      const hasVendors = !!document.querySelector("#vendors");
+      const hasSearch =
+        window.matchMedia("(min-width: 768px)").matches
+          ? !!document.querySelector("#search-container")
+          : !!document.querySelector("#mobile-search-input");
 
-      let seen = false;
-      try {
-        seen = !!sessionStorage.getItem(`nearnow_tour_session_home_${user?.id ?? "guest"}`);
-      } catch {
-        seen = true;
+      if (hasLocationBtn && hasFilters && hasVendors && hasSearch) {
+        startTour();
+        return;
       }
-      if (seen) return;
 
-      let attempts = 0;
-      const tick = () => {
-        attempts += 1;
-        const ready = required.every((sel) => !!document.querySelector(sel));
-        if (ready) {
-          startHomeTour();
-          return;
-        }
-        if (attempts < 20) window.setTimeout(tick, 250);
-      };
+      if (attempts < 20) window.setTimeout(tick, 250);
+    };
 
-      window.setTimeout(tick, 300);
-      return;
-    }
-
-    if (location.pathname === "/vendor/dashboard" && vendorId) {
-      let seen = false;
-      try {
-        seen = !!sessionStorage.getItem(`nearnow_tour_session_vendor_${vendorId}`);
-      } catch {
-        seen = true;
-      }
-      if (seen) return;
-
-      const required = ["#vendor-toggle-open", "#vendor-quick-actions", "#vendor-update-location", "#vendor-add-item"]; 
-
-      let attempts = 0;
-      const tick = () => {
-        attempts += 1;
-        const ready = required.every((sel) => !!document.querySelector(sel));
-        if (ready) {
-          startVendorTour(vendorId);
-          return;
-        }
-        if (attempts < 20) window.setTimeout(tick, 250);
-      };
-      window.setTimeout(tick, 300);
-    }
-  }, [loading, location.pathname, user?.id, vendorId, t]);
+    window.setTimeout(tick, 300);
+  }, [location.pathname, t]);
 
   useEffect(() => {
     if (location.pathname !== "/") return;
@@ -402,8 +288,7 @@ export function AppShell() {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => {
-                      if (location.pathname === "/vendor/dashboard" && vendorId) startVendorTour(vendorId, true);
-                      else startHomeTour(true);
+                      startTour(true);
                     }}
                   >
                     {t("tour.start")}

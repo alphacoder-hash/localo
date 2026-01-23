@@ -22,7 +22,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# Vite & Vitest
-.vite-cache
-vitest.config.ts.timestamp-*

@@ -55,7 +55,7 @@ export default function Auth() {
       setLoading(true);
       try {
         const redirectUrl = `${window.location.origin}/`;
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email: parsed.data.email,
           password: parsed.data.password,
           options: {
@@ -63,11 +63,20 @@ export default function Auth() {
           },
         });
         if (error) throw error;
+
+        // Force logout if auto-logged in, to enforce manual login
+        if (data.session) {
+          await supabase.auth.signOut();
+        }
+
         toast({
           title: "Account created",
-          description: "You can now continue.",
+          description: "Registration successful. Please login to access your account.",
         });
-        navigate(target, { replace: true });
+        
+        setMode("login");
+        setPassword("");
+        setConfirmPassword("");
       } catch (e: any) {
         toast({
           title: "Signup failed",

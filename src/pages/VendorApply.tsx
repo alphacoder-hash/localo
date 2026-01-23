@@ -61,25 +61,6 @@ export default function VendorApply() {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (!user) return;
-    void supabase
-      .from("vendors")
-      .select("id")
-      .eq("owner_user_id", user.id)
-      .limit(1)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          toast({
-            title: "Already applied",
-            description: "You have already submitted a vendor application.",
-          });
-          navigate("/vendor/dashboard", { replace: true });
-        }
-      });
-  }, [user, navigate, toast]);
-
   const mappedType = useMemo(
     () => (vendorType === "moving" ? "moving_stall" : "fixed_shop"),
     [vendorType],
@@ -406,8 +387,12 @@ export default function VendorApply() {
                   <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Fruit & Veg" />
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <Label>Landmark / Address note *</Label>
-                  <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Near metro gate, Opp. SBI ATM…" />
+                  <Label>{vendorType === "fixed" ? "Shop Address / Landmark *" : "Usual Area / Landmark *"}</Label>
+                  <Input
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder={vendorType === "fixed" ? "Shop No. 12, Main Market..." : "Near metro gate, Opp. SBI ATM…"}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>City *</Label>
@@ -449,9 +434,11 @@ export default function VendorApply() {
                     <MapPin className="h-4 w-4" />
                   </span>
                   <div>
-                    <p className="font-semibold">Capture your current location</p>
+                    <p className="font-semibold">{vendorType === "fixed" ? "Pin your shop location" : "Capture starting location"}</p>
                     <p className="text-sm text-muted-foreground">
-                      For moving stalls, you’ll update this daily.
+                      {vendorType === "fixed"
+                        ? "This will be your permanent location on the map."
+                        : "You can update this location daily when you go online."}
                     </p>
                   </div>
                 </div>

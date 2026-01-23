@@ -23,8 +23,8 @@ export default function HowItWorks() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-start gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground">
-                <MapPin className="h-4 w-4" />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground font-bold">
+                1
               </span>
               <div>
                 <p className="font-semibold">Turn on location</p>
@@ -32,8 +32,8 @@ export default function HowItWorks() {
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground">
-                <ShoppingBasket className="h-4 w-4" />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground font-bold">
+                2
               </span>
               <div>
                 <p className="font-semibold">Browse & pick</p>
@@ -41,8 +41,8 @@ export default function HowItWorks() {
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground">
-                <QrCode className="h-4 w-4" />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground font-bold">
+                3
               </span>
               <div>
                 <p className="font-semibold">Pay at pickup</p>
@@ -58,8 +58,8 @@ export default function HowItWorks() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-start gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground">
-                <Store className="h-4 w-4" />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground font-bold">
+                1
               </span>
               <div>
                 <p className="font-semibold">Register & verify</p>
@@ -67,8 +67,8 @@ export default function HowItWorks() {
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground">
-                <ShoppingBasket className="h-4 w-4" />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground font-bold">
+                2
               </span>
               <div>
                 <p className="font-semibold">Add your catalog</p>
@@ -76,8 +76,8 @@ export default function HowItWorks() {
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground">
-                <MapPin className="h-4 w-4" />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-secondary-foreground font-bold">
+                3
               </span>
               <div>
                 <p className="font-semibold">Update today’s location</p>
